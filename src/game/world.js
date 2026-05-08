@@ -558,8 +558,40 @@ export class World {
   // ----- Bullets -----
   updateBullets(dt) {
     const arr = this.bullets;
+    const HOMING_RANGE = 260;
+    const HOMING_RANGE_SQ = HOMING_RANGE * HOMING_RANGE;
+    const HOMING_DOT = 0.78; // cone half-angle ~38°, only bend toward targets in front
+    const HOMING_TURN = 2.6; // rad/s — gentle bend, won't lock onto wide-angle targets
     for (let i = arr.length - 1; i >= 0; i--) {
       const b = arr[i];
+      const speed = Math.hypot(b.vx, b.vy);
+      if (speed > 1 && this.zombies.length) {
+        const dirX = b.vx / speed, dirY = b.vy / speed;
+        let bestZ = null, bestScore = -Infinity;
+        for (const z of this.zombies) {
+          if (z.dead) continue;
+          if (b.hits.has(z.id)) continue;
+          const dx = z.x - b.x, dy = z.y - b.y;
+          const d2 = dx*dx + dy*dy;
+          if (d2 > HOMING_RANGE_SQ) continue;
+          const d = Math.sqrt(d2) || 1;
+          const dot = (dx * dirX + dy * dirY) / d;
+          if (dot < HOMING_DOT) continue;
+          const score = dot - d / HOMING_RANGE;
+          if (score > bestScore) { bestScore = score; bestZ = z; }
+        }
+        if (bestZ) {
+          const dx = bestZ.x - b.x, dy = bestZ.y - b.y;
+          const dlen = Math.hypot(dx, dy) || 1;
+          const tx = dx / dlen, ty = dy / dlen;
+          const k = Math.min(1, HOMING_TURN * dt);
+          const nx = dirX + (tx - dirX) * k;
+          const ny = dirY + (ty - dirY) * k;
+          const m = Math.hypot(nx, ny) || 1;
+          b.vx = (nx / m) * speed;
+          b.vy = (ny / m) * speed;
+        }
+      }
       b.x += b.vx * dt; b.y += b.vy * dt;
       b.ttl -= dt;
       let removed = false;
