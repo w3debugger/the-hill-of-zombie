@@ -604,7 +604,7 @@ export class World {
       owner.score += Math.floor(10 * cfg.scoreMul);
     }
     if (z.type === 'brute') this.hitstopMs = Math.max(this.hitstopMs, 60);
-    this.events.push({ type:'zombie_died', id: z.id, ztype: z.type, x: z.x, y: z.y });
+    this.events.push({ type:'zombie_died', id: z.id, ztype: z.type, x: z.x, y: z.y, killerId: ownerId ?? null });
     // pickups
     const drop = Math.random();
     let pk = null;

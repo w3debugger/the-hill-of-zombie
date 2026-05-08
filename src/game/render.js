@@ -7,6 +7,7 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
+const ease = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
 export class Renderer {
   constructor(canvas) {
@@ -17,7 +18,7 @@ export class Renderer {
     this.viewH = 0;
     this.particles = [];
     this.decals = [];
-    this.cam = { x: 0, y: 0, sx: 0, sy: 0, shake: 0 };
+    this.cam = { x: 0, y: 0, sx: 0, sy: 0, shake: 0, zoom: 1, targetX: null, targetY: null, focusBlend: 0 };
     this.timeMs = 0;
     this.localPlayerId = null;
     this.localMuzzleFlash = 0;
@@ -26,6 +27,8 @@ export class Renderer {
     this.lightingSprite = null;     // cached vignette
     this.glowSprites = null;        // cached eye/muzzle glows
     this._tmpScreen = { x: 0, y: 0 }; // scratch for worldToScreen
+    this.cinematic = null;          // see triggerKillCinematic
+    this.bloodSpreadAccum = 0;      // schedules blood-spread bursts during cinematic
     this.buildGround();
     this._buildGlowSprites();
     this.resize();
@@ -124,15 +127,55 @@ export class Renderer {
     this.groundCanvas = c;
   }
 
+  // worldToScreen returns *un-zoomed* canvas pixels. The world layer is drawn
+  // inside a ctx.scale(zoom) transform, so visual size scales automatically.
   worldToScreen(wx, wy) {
     return { x: (wx - this.cam.x) + this.viewW / 2 + this.cam.sx, y: (wy - this.cam.y) + this.viewH / 2 + this.cam.sy };
   }
+  // screenToWorld inverts the ctx.scale so mouse aim stays correct during a zoomed cinematic.
   screenToWorld(sx, sy) {
-    return { x: sx - this.viewW / 2 - this.cam.sx + this.cam.x, y: sy - this.viewH / 2 - this.cam.sy + this.cam.y };
+    const z = this.cam.zoom || 1;
+    const cx = this.viewW / 2 + this.cam.sx;
+    const cy = this.viewH / 2 + this.cam.sy;
+    return { x: (sx - cx) / z + this.cam.x, y: (sy - cy) / z + this.cam.y };
   }
 
   setLocalPlayer(id) { this.localPlayerId = id; }
   addShake(amount) { this.cam.shake = Math.min(1, this.cam.shake + amount); }
+
+  // Cinematic kill cam. Phases (total ~1100ms):
+  //  0..160ms   IN: zoom 1 → 2.6, letterbox 0 → 1, camera lerps to halfway
+  //  160..820ms HOLD: stay zoomed, slow-mo on particles, blood spreads outward
+  //  820..1100ms OUT: zoom & letterbox back to 1
+  triggerKillCinematic(opts) {
+    if (this.cinematic) return; // one at a time; cooldown is enforced by caller
+    const { x, y, killerX, killerY, ztype = 'walker', weapon = 'pistol' } = opts || {};
+    this.cinematic = {
+      age: 0, dur: 1.1,
+      x, y, kx: killerX, ky: killerY,
+      ztype, weapon,
+      phase: 'in',
+      flashed: false,
+    };
+    // Initial impact pop: a heavy spray + extra decals around the kill site
+    this.bigBlood(x, y);
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * TAU;
+      const d = rand(2, 22);
+      this.decals.push({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, r: rand(4, 9), alpha: 0.7, age: 0 });
+    }
+    if (this.decals.length > 260) this.decals.splice(0, this.decals.length - 260);
+    this.addShake(0.45);
+  }
+  isCinematicActive() { return !!this.cinematic; }
+  cinematicTimeScale() {
+    if (!this.cinematic) return 1;
+    // Slow-mo during the hold phase, ramp out at the tail.
+    const t = this.cinematic.age;
+    if (t < 0.16) return lerp(1, 0.18, t / 0.16);
+    if (t < 0.82) return 0.18 + 0.06 * Math.sin(t * 14); // tiny pulse
+    return lerp(0.22, 1, (t - 0.82) / 0.28);
+  }
 
   // ----- Effects API (called by client in response to events) -----
   bloodSplatter(x, y, dirAngle, intensity = 1) {
@@ -164,11 +207,16 @@ export class Renderer {
     this.particles.push({ x: x - Math.cos(angle) * 6, y: y - Math.sin(angle) * 6, vx: Math.cos(ca) * rand(60, 120), vy: Math.sin(ca) * rand(60, 120), life: 0.6, max: 0.6, size: 1.6, color: '#d4a060', type: 'casing' });
   }
   bigBlood(x, y) {
-    for (let i = 0; i < 22; i++) {
+    for (let i = 0; i < 28; i++) {
       const a = rand(0, TAU);
-      this.particles.push({ x, y, vx: Math.cos(a)*rand(120, 320), vy: Math.sin(a)*rand(120, 320), life: rand(0.4, 0.9), max: 0.9, size: rand(3, 6), color: '#a01515', type: 'blood' });
+      this.particles.push({ x, y, vx: Math.cos(a)*rand(120, 360), vy: Math.sin(a)*rand(120, 360), life: rand(0.4, 1.0), max: 1.0, size: rand(3, 6), color: '#a01515', type: 'blood' });
     }
-    this.bloodSplatter(x, y, rand(0, TAU), 1.4);
+    // darker arterial droplets that linger
+    for (let i = 0; i < 10; i++) {
+      const a = rand(0, TAU);
+      this.particles.push({ x, y, vx: Math.cos(a)*rand(40, 140), vy: Math.sin(a)*rand(40, 140), life: rand(0.7, 1.2), max: 1.2, size: rand(2, 4), color: '#5a0808', type: 'blood' });
+    }
+    this.bloodSplatter(x, y, rand(0, TAU), 1.6);
   }
   spawnDrool(x, y, kind) {
     const c = kind === 'green' ? '#5a7a14' : '#5a0808';
@@ -186,29 +234,90 @@ export class Renderer {
   // ----- Per-frame -----
   tick(dt, mouse, world) {
     this.timeMs += dt * 1000;
-    // camera follow local player
-    if (world) {
-      const lp = world.players.find(p => p.id === this.localPlayerId) || world.players[0];
-      if (lp) {
-        this.cam.x = lerp(this.cam.x, lp.x, 1 - Math.exp(-8 * dt));
-        this.cam.y = lerp(this.cam.y, lp.y, 1 - Math.exp(-8 * dt));
+
+    // Cinematic kill cam: drives camera focus + zoom + slow-mo particles.
+    if (this.cinematic) {
+      this.cinematic.age += dt;
+      const c = this.cinematic;
+      if (c.age >= c.dur) {
+        this.cinematic = null;
+        this.cam.zoom = 1;
+        this.cam.focusBlend = 0;
       }
     }
+
+    // camera follow: local player by default, blended toward kill spot during cinematic
+    if (world) {
+      const lp = world.players.find(p => p.id === this.localPlayerId) || world.players[0];
+      this.localPlayerPos = lp ? { x: lp.x, y: lp.y } : null;
+      let targetX = lp ? lp.x : this.cam.x;
+      let targetY = lp ? lp.y : this.cam.y;
+      let targetZoom = 1;
+      let targetBlend = 0;
+      if (this.cinematic) {
+        const c = this.cinematic;
+        // Focus on a point biased toward the zombie (more dramatic than midpoint).
+        const focusX = c.x * 0.7 + (c.kx ?? c.x) * 0.3;
+        const focusY = c.y * 0.7 + (c.ky ?? c.y) * 0.3;
+        // Blend: 0..1 in, hold at 1, 1..0 out
+        if (c.age < 0.16)      targetBlend = c.age / 0.16;
+        else if (c.age < 0.82) targetBlend = 1;
+        else                   targetBlend = Math.max(0, 1 - (c.age - 0.82) / 0.28);
+        const k = ease(targetBlend);
+        targetX = lerp(targetX, focusX, k);
+        targetY = lerp(targetY, focusY, k);
+        targetZoom = lerp(1, 2.5, k);
+      }
+      this.cam.focusBlend = targetBlend;
+      this.cam.x = lerp(this.cam.x, targetX, 1 - Math.exp(-(this.cinematic ? 14 : 8) * dt));
+      this.cam.y = lerp(this.cam.y, targetY, 1 - Math.exp(-(this.cinematic ? 14 : 8) * dt));
+      this.cam.zoom = lerp(this.cam.zoom, targetZoom, 1 - Math.exp(-12 * dt));
+    }
+
     if (this.cam.shake > 0) {
       this.cam.shake = Math.max(0, this.cam.shake - dt * 4);
       const m = this.cam.shake * this.cam.shake * 18;
       this.cam.sx = (Math.random() * 2 - 1) * m;
       this.cam.sy = (Math.random() * 2 - 1) * m;
     } else { this.cam.sx = 0; this.cam.sy = 0; }
-    // particles
+
+    // particles (apply slow-mo during cinematic)
+    const pdt = dt * this.cinematicTimeScale();
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
-      if (p.type === 'blood') { p.vx *= 0.86; p.vy *= 0.86; }
-      else if (p.type === 'smoke') { p.vx *= 0.95; p.vy *= 0.95; p.size += dt * 8; }
-      else if (p.type === 'casing') { p.vx *= 0.9; p.vy *= 0.9; }
+      p.x += p.vx * pdt; p.y += p.vy * pdt; p.life -= pdt;
+      if (p.type === 'blood') { p.vx *= Math.pow(0.86, pdt / 0.0166); p.vy *= Math.pow(0.86, pdt / 0.0166); }
+      else if (p.type === 'smoke') { p.vx *= Math.pow(0.95, pdt / 0.0166); p.vy *= Math.pow(0.95, pdt / 0.0166); p.size += pdt * 8; }
+      else if (p.type === 'casing') { p.vx *= Math.pow(0.9, pdt / 0.0166); p.vy *= Math.pow(0.9, pdt / 0.0166); }
       if (p.life <= 0) this.particles.splice(i, 1);
     }
+
+    // During cinematic hold phase, schedule periodic blood-spread bursts so
+    // the splatter visibly grows over the slow-mo window.
+    if (this.cinematic && this.cinematic.age > 0.16 && this.cinematic.age < 0.82) {
+      this.bloodSpreadAccum += dt;
+      const interval = 0.06;
+      while (this.bloodSpreadAccum >= interval) {
+        this.bloodSpreadAccum -= interval;
+        const c = this.cinematic;
+        const a = Math.random() * TAU;
+        const d = rand(6, 28);
+        this.particles.push({
+          x: c.x, y: c.y,
+          vx: Math.cos(a) * rand(40, 130),
+          vy: Math.sin(a) * rand(40, 130),
+          life: rand(0.4, 0.7), max: 0.7, size: rand(2, 4),
+          color: '#a01515', type: 'blood',
+        });
+        if (Math.random() < 0.6) {
+          this.decals.push({ x: c.x + Math.cos(a) * d, y: c.y + Math.sin(a) * d, r: rand(2, 5), alpha: 0.55, age: 0 });
+        }
+      }
+      if (this.decals.length > 260) this.decals.splice(0, this.decals.length - 260);
+    } else {
+      this.bloodSpreadAccum = 0;
+    }
+
     if (this.localMuzzleFlash > 0) this.localMuzzleFlash -= dt;
     for (const d of this.decals) d.age += dt;
     // Prune sprite cache every 30 frames (~0.5s)
@@ -222,6 +331,16 @@ export class Renderer {
     ctx.clearRect(0, 0, this.viewW, this.viewH);
     if (!world) return;
 
+    const zoom = this.cam.zoom || 1;
+    const zoomed = Math.abs(zoom - 1) > 0.001;
+
+    if (zoomed) {
+      ctx.save();
+      ctx.translate(this.viewW / 2 + this.cam.sx, this.viewH / 2 + this.cam.sy);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-(this.viewW / 2 + this.cam.sx), -(this.viewH / 2 + this.cam.sy));
+    }
+
     this.drawGround();
     this.drawArenaEdge();
     this.drawDecals();
@@ -231,7 +350,12 @@ export class Renderer {
     this.drawPlayers(world);
     this.drawBullets(world);
     this.drawParticles();
+    this.drawMuzzleGlow(world);
+
+    if (zoomed) ctx.restore();
+
     this.drawLighting(world);
+    this.drawCinematicOverlay();
     this.drawCrosshair(world, mouse);
   }
 
@@ -668,16 +792,37 @@ export class Renderer {
     // eye glow halo (cached glow sprite, drawn at world-space eye position)
     if (!flash) {
       const flicker = 0.55 + 0.45 * Math.sin(this.timeMs * 0.015 + z.seed * 11);
+      // Twitch: brief intense flare every few seconds (matches eye twitch phase).
+      const twitch = Math.sin(this.timeMs * 0.0009 + z.seed * 3.7) > 0.92 ? 1.45 : 1;
+      // Proximity aura: zombies near the local player glow much more menacingly.
+      let proxBoost = 1;
+      if (this.localPlayerPos) {
+        const dx = z.x - this.localPlayerPos.x;
+        const dy = z.y - this.localPlayerPos.y;
+        const d = Math.hypot(dx, dy);
+        const NEAR = 200, FAR = 520;
+        if (d < FAR) {
+          const k = Math.max(0, Math.min(1, (FAR - d) / (FAR - NEAR)));
+          proxBoost = 1 + k * 1.4;
+        }
+      }
       const eyeFwd = r * 0.55 + r * 0.5 * 0.18;
       const exwx = z.x + Math.cos(z.angle) * eyeFwd;
       const exwy = z.y + Math.sin(z.angle) * eyeFwd;
       const esx = (exwx - this.cam.x) + this.viewW / 2 + this.cam.sx;
       const esy = (exwy - this.cam.y) + this.viewH / 2 + this.cam.sy;
-      const haloR = r * 1.0 * flicker;
+      const haloR = r * 1.05 * flicker * twitch * proxBoost;
       const sprite = z.type === 'spitter' ? this.glowSprites.green : this.glowSprites.red;
       const a = ctx.globalAlpha;
-      ctx.globalAlpha = 0.42 * flicker;
+      ctx.globalAlpha = Math.min(0.95, 0.42 * flicker * proxBoost);
       ctx.drawImage(sprite, esx - haloR, esy - haloR, haloR * 2, haloR * 2);
+      // Outer body aura when zombie is close — a wider faint red wash around the corpse silhouette
+      if (proxBoost > 1.4) {
+        const auraR = r * 2.4 * proxBoost;
+        const intensity = (proxBoost - 1) / 1.4;
+        ctx.globalAlpha = 0.22 * intensity;
+        ctx.drawImage(sprite, sx - auraR, sy - auraR, auraR * 2, auraR * 2);
+      }
       ctx.globalAlpha = a;
     }
   }
@@ -731,14 +876,30 @@ export class Renderer {
     cx.translate(headOffset, 0);
     cx.rotate(headTilt);
     const flicker = 0.65 + 0.35 * Math.sin(this.timeMs * 0.015 + seed * 11);
-    const eyeCol = z.type === 'spitter'
-      ? `rgba(220, 255, ${(50 + flicker * 60) | 0}, 1)`
-      : `rgba(255, ${(20 + flicker * 50) | 0}, ${(20 + flicker * 30) | 0}, 1)`;
-    cx.fillStyle = eyeCol;
-    const eyeR = 1.3 + flicker * 0.6;
+    // Occasional rapid twitch — eye blast brighter & jitters for ~120ms every few seconds.
+    const twitchPhase = Math.sin(this.timeMs * 0.0009 + seed * 3.7);
+    const twitching = twitchPhase > 0.92;
+    const intensity = twitching ? 1 : flicker;
+    const jitterX = twitching ? (Math.sin(this.timeMs * 0.06 + seed) * 0.6) : 0;
+    const jitterY = twitching ? (Math.cos(this.timeMs * 0.07 + seed) * 0.6) : 0;
+    // Inner sclera glow (white-hot core)
+    cx.fillStyle = z.type === 'spitter'
+      ? `rgba(255, 255, 200, ${0.55 * intensity})`
+      : `rgba(255, 220, 200, ${0.55 * intensity})`;
+    const coreR = (1.6 + intensity * 0.9) + (twitching ? 0.6 : 0);
     cx.beginPath();
-    cx.arc(headR * 0.22, -headR * 0.4, eyeR, 0, TAU);
-    cx.arc(headR * 0.22,  headR * 0.4, eyeR, 0, TAU);
+    cx.arc(headR * 0.22 + jitterX, -headR * 0.4 + jitterY, coreR, 0, TAU);
+    cx.arc(headR * 0.22 + jitterX,  headR * 0.4 + jitterY, coreR, 0, TAU);
+    cx.fill();
+    // Pupil (saturated)
+    const eyeCol = z.type === 'spitter'
+      ? `rgba(200, 255, ${(40 + intensity * 70) | 0}, 1)`
+      : `rgba(255, ${(20 + intensity * 50) | 0}, ${(20 + intensity * 30) | 0}, 1)`;
+    cx.fillStyle = eyeCol;
+    const eyeR = 1.3 + intensity * 0.7;
+    cx.beginPath();
+    cx.arc(headR * 0.22 + jitterX, -headR * 0.4 + jitterY, eyeR, 0, TAU);
+    cx.arc(headR * 0.22 + jitterX,  headR * 0.4 + jitterY, eyeR, 0, TAU);
     cx.fill();
     cx.restore();
   }
@@ -876,22 +1037,87 @@ export class Renderer {
     }
   }
 
+  drawMuzzleGlow(world) {
+    const ctx = this.ctx;
+    const lp = world.players.find(p => p.id === this.localPlayerId) || world.players[0];
+    if (!lp || !(lp.muzzleFlash > 0)) return;
+    const k = lp.muzzleFlash / 0.06;
+    const fwx = lp.x + Math.cos(lp.angle) * 22;
+    const fwy = lp.y + Math.sin(lp.angle) * 22;
+    const fcx = (fwx - this.cam.x) + this.viewW / 2 + this.cam.sx;
+    const fcy = (fwy - this.cam.y) + this.viewH / 2 + this.cam.sy;
+    const size = 360 * k;
+    const a = ctx.globalAlpha;
+    ctx.globalAlpha = 0.55 * k;
+    ctx.drawImage(this.glowSprites.yellow, fcx - size / 2, fcy - size / 2, size, size);
+    ctx.globalAlpha = a;
+  }
+
   drawLighting(world) {
     const ctx = this.ctx;
     if (this.lightingSprite) ctx.drawImage(this.lightingSprite, 0, 0);
-    const lp = world.players.find(p => p.id === this.localPlayerId) || world.players[0];
-    if (!lp) return;
-    if (lp.muzzleFlash > 0) {
-      const k = lp.muzzleFlash / 0.06;
-      const fwx = lp.x + Math.cos(lp.angle) * 22;
-      const fwy = lp.y + Math.sin(lp.angle) * 22;
-      const fcx = (fwx - this.cam.x) + this.viewW / 2 + this.cam.sx;
-      const fcy = (fwy - this.cam.y) + this.viewH / 2 + this.cam.sy;
-      const size = 360 * k;
-      const a = ctx.globalAlpha;
-      ctx.globalAlpha = 0.55 * k;
-      ctx.drawImage(this.glowSprites.yellow, fcx - size / 2, fcy - size / 2, size, size);
-      ctx.globalAlpha = a;
+  }
+
+  drawCinematicOverlay() {
+    if (!this.cinematic) return;
+    const ctx = this.ctx;
+    const c = this.cinematic;
+    const blend = this.cam.focusBlend; // 0..1 in/hold/out
+    if (blend <= 0) return;
+
+    // Letterbox bars
+    const barH = this.viewH * 0.11 * blend;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, this.viewW, barH);
+    ctx.fillRect(0, this.viewH - barH, this.viewW, barH);
+
+    // Edge vignette (heavier than the normal one)
+    const grad = ctx.createRadialGradient(
+      this.viewW / 2, this.viewH / 2, this.viewH * 0.18,
+      this.viewW / 2, this.viewH / 2, this.viewH * 0.7
+    );
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, `rgba(8,0,0,${0.55 * blend})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, this.viewW, this.viewH);
+
+    // Brief impact white-flash at the start of the hold phase
+    if (c.age >= 0.14 && c.age < 0.28) {
+      const t = (c.age - 0.14) / 0.14;
+      const a = (1 - t) * 0.55;
+      ctx.fillStyle = `rgba(255, 230, 220, ${a.toFixed(3)})`;
+      ctx.fillRect(0, 0, this.viewW, this.viewH);
+    }
+
+    // Subtle red bloom that fades through the cinematic
+    const bloomA = 0.18 * blend * (0.6 + 0.4 * Math.sin(c.age * 9));
+    ctx.fillStyle = `rgba(120, 8, 8, ${bloomA.toFixed(3)})`;
+    ctx.fillRect(0, 0, this.viewW, this.viewH);
+
+    // "KILL" stamp upper-right during hold
+    if (c.age > 0.18 && c.age < 0.85) {
+      const stampA = blend * (c.age < 0.32 ? (c.age - 0.18) / 0.14 : 1) * (c.age > 0.7 ? Math.max(0, 1 - (c.age - 0.7) / 0.15) : 1);
+      ctx.save();
+      ctx.globalAlpha = stampA;
+      const label = (
+        c.ztype === 'brute' ? 'BRUTE DOWN' :
+        c.ztype === 'spitter' ? 'SPITTER DOWN' :
+        c.ztype === 'runner' ? 'RUNNER DOWN' :
+        'WALKER DOWN'
+      );
+      ctx.font = '900 26px "Rubik", system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'top';
+      const padX = 28, padY = barH + 16;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      const w = ctx.measureText(label).width;
+      ctx.fillRect(this.viewW - padX - w - 14, padY - 4, w + 18, 36);
+      ctx.fillStyle = '#ff3030';
+      ctx.fillText(label, this.viewW - padX, padY);
+      ctx.font = '600 11px "Rubik", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.fillText('CONFIRMED', this.viewW - padX, padY + 22);
+      ctx.restore();
     }
   }
 

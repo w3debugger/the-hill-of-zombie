@@ -50,6 +50,12 @@ export class GameClient {
     this.clientEnemyBullets = [];      // visual-only ballistic
     this.localPredict = null;          // { x, y, vx, vy, angle } for local player
     this.netStartTime = 0;
+
+    // Cinematic kill-cam pacing
+    this.localKillCount = 0;
+    this.lastCinematicAt = -1e9;
+    this.killCamEvery = 6;             // fire on every Nth local-player kill
+    this.killCamCooldownMs = 8000;     // never fire more often than this
   }
 
   // Solo
@@ -405,6 +411,31 @@ export class GameClient {
     });
   }
 
+  _maybeTriggerKillCam(ev) {
+    if (!ev || ev.killerId !== this.localPlayerId) return;
+    if (this.renderer.isCinematicActive()) return;
+    this.localKillCount++;
+    const now = performance.now();
+    const sinceLast = now - this.lastCinematicAt;
+    if (sinceLast < this.killCamCooldownMs) return;
+
+    // Force a kill-cam on every Nth kill, plus a small chance otherwise once cooldown clears.
+    const force = (this.localKillCount % this.killCamEvery === 0);
+    const lucky = Math.random() < 0.08;
+    // Brutes are always cinematic when off-cooldown.
+    const brute = ev.ztype === 'brute';
+    if (!force && !lucky && !brute) return;
+
+    const lp = this.world?.players?.find(p => p.id === this.localPlayerId);
+    this.lastCinematicAt = now;
+    this.renderer.triggerKillCinematic({
+      x: ev.x, y: ev.y,
+      killerX: lp?.x, killerY: lp?.y,
+      ztype: ev.ztype,
+      weapon: lp?.weapon || 'pistol',
+    });
+  }
+
   _handleEvents(events) {
     if (!events) return;
     const r = this.renderer;
@@ -451,6 +482,7 @@ export class GameClient {
           if (isMP) this.zombieStatic.delete(ev.id);
           if (ev.ztype === 'brute') { a.play('brute'); r.addShake(0.4); }
           else a.play('death');
+          this._maybeTriggerKillCam(ev);
           break;
         }
         case 'player_hurt': {
