@@ -72,10 +72,13 @@ function refillMagsFromReserve(p) {
 
 function buildWaveComposition(n) {
   const list = [];
-  const walkers  = Math.min(60, 8 + Math.floor(n * 2.2));
-  const runners  = n >= 2 ? Math.min(40, 2 + Math.floor((n - 1) * 1.6)) : 0;
-  const brutes   = n >= 4 ? Math.min(10, 1 + Math.floor((n - 4) / 2)) : 0;
-  const spitters = n >= 5 ? Math.min(20, 2 + Math.floor((n - 5) * 1.2)) : 0;
+  // Gentle ramp on waves 1–2 so players can learn the controls before the swarm.
+  const walkers  = n === 1 ? 6
+                 : n === 2 ? 9
+                 : Math.min(60, 6 + Math.floor(n * 2.2));
+  const runners  = n >= 3 ? Math.min(40, 2 + Math.floor((n - 2) * 1.6)) : 0;
+  const brutes   = n >= 5 ? Math.min(10, 1 + Math.floor((n - 5) / 2)) : 0;
+  const spitters = n >= 6 ? Math.min(20, 2 + Math.floor((n - 6) * 1.2)) : 0;
   for (let i = 0; i < walkers; i++) list.push('walker');
   for (let i = 0; i < runners; i++) list.push('runner');
   for (let i = 0; i < brutes; i++) list.push('brute');
@@ -361,13 +364,15 @@ export class World {
     let y = focus.y + Math.sin(ang) * dist;
     const r = Math.hypot(x, y);
     if (r > ARENA_R - 40) { x *= (ARENA_R - 40) / r; y *= (ARENA_R - 40) / r; }
-    const baseHp = cfg.hp + Math.floor(this.waveNum * (type === 'brute' ? 30 : 4));
+    // Soften HP creep on early waves so a fresh pistol can still drop walkers in 3 shots.
+    const hpWave = Math.max(0, this.waveNum - 2);
+    const baseHp = cfg.hp + Math.floor(hpWave * (type === 'brute' ? 30 : 4));
     this.zombies.push({
       id: nextId(),
       type, x, y, vx: 0, vy: 0,
       hp: baseHp, maxHp: baseHp,
       r: cfg.r,
-      speed: cfg.speed * (1 + Math.min(0.4, this.waveNum * 0.02)),
+      speed: cfg.speed * (1 + Math.min(0.4, Math.max(0, this.waveNum - 2) * 0.02)),
       flash: 0,
       atkCdMs: rand(0, cfg.atkCd),
       wobble: rand(0, TAU),
@@ -384,7 +389,8 @@ export class World {
     this.spawnTimerMs -= dt * 1000;
     if (this.spawnTimerMs > 0) return;
     if (this.spawnQueue.length === 0) return;
-    const baseDelay = clamp(900 - this.waveNum * 35, 250, 900);
+    // Slower drip on the first couple of waves; tightens up as players gear up.
+    const baseDelay = clamp(1100 - this.waveNum * 45, 250, 1100);
     this.spawnTimerMs = rand(baseDelay * 0.7, baseDelay * 1.3);
     const type = this.spawnQueue.shift();
     this.spawnZombie(type);
