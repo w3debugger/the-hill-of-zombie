@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: hill-of-zombie-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/index.js
+    healthCheckPath: /health

@@ -1,15 +1,25 @@
 // Authoritative multiplayer server.
 // Runs the World per room at 30Hz, broadcasts snapshots at 20Hz.
 
+import http from 'http';
 import { WebSocketServer } from 'ws';
 import { World } from '../src/game/world.js';
 import { C2S, S2C } from '../src/net/protocol.js';
 
 const PORT = Number(process.env.PORT) || 3001;
-const wss = new WebSocketServer({ port: PORT });
-
 const log = (...args) => console.log('[hoz]', ...args);
-log(`WebSocket server listening on :${PORT}`);
+
+const httpServer = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+const wss = new WebSocketServer({ server: httpServer });
+httpServer.listen(PORT, () => log(`HTTP+WS server listening on :${PORT}`));
 
 const rooms = new Map();   // code -> Room
 const clients = new Map(); // ws -> Client
@@ -203,6 +213,7 @@ const shutdown = () => {
   log('shutting down');
   for (const r of rooms.values()) r.shutdown();
   wss.close();
+  httpServer.close();
   setTimeout(() => process.exit(0), 100);
 };
 process.on('SIGINT', shutdown);
