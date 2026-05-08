@@ -10,12 +10,17 @@ import { PLAYER_COLORS } from '../game/data.js';
 const WS_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL)
   || (typeof window !== 'undefined' ? `ws://${window.location.hostname}:3001` : 'ws://localhost:3001');
 
+const DEFAULT_NAMES = [
+  'Khalid', 'Hamza', 'Tariq', 'Bilal', 'Yusuf', 'Umar', 'Salahuddin',
+  'Zaid', 'Ibrahim', 'Idris', 'Ayyub', 'Saif', 'Imran', 'Faris', 'Anas',
+];
 function loadProfile() {
   try {
     const s = localStorage.getItem('hoz.profile');
     if (s) return JSON.parse(s);
   } catch (e) {}
-  return { name: 'Sgt. Vance', color: PLAYER_COLORS[0] };
+  const name = DEFAULT_NAMES[Math.floor(Math.random() * DEFAULT_NAMES.length)];
+  return { name, color: PLAYER_COLORS[0] };
 }
 function saveProfile(p) {
   try { localStorage.setItem('hoz.profile', JSON.stringify(p)); } catch (e) {}
@@ -218,8 +223,28 @@ export function App() {
     }
   };
 
+  useEffect(() => {
+    if (!IS_TOUCH) return;
+    const tryLock = () => {
+      const o = window.screen?.orientation;
+      if (o && typeof o.lock === 'function') {
+        o.lock('landscape').catch(() => {});
+      }
+    };
+    tryLock();
+    const onFs = () => tryLock();
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+
   return (
     <>
+      {IS_TOUCH && (
+        <div class="orientation-lock" role="alertdialog" aria-label="Rotate your device">
+          <div class="orientation-lock-icon" aria-hidden="true" />
+          <div class="orientation-lock-text">Rotate to landscape</div>
+        </div>
+      )}
       {screen === 'intro' && <Intro onDone={finishIntro} />}
       {screen === 'menu' && (
         <MainMenu
