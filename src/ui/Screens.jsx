@@ -150,7 +150,7 @@ export function Lobby({ profile, lobby, isHost, onStart, onLeave, onReady, error
               )}
             </div>
           ))}
-          {Array.from({ length: Math.max(0, 4 - lobby.players.length) }).map((_, i) => (
+          {Array.from({ length: Math.max(0, 10 - lobby.players.length) }).map((_, i) => (
             <div key={`empty-${i}`} class="player-row empty">
               <span class="dot empty-dot" />
               <span class="player-name">— empty slot —</span>

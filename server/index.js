@@ -180,7 +180,7 @@ function handleMessage(c, msg) {
       const r = rooms.get(code);
       if (!r) return c.send(S2C.ERROR, { msg: 'Room not found' });
       if (r.world) return c.send(S2C.ERROR, { msg: 'Match already in progress' });
-      if (r.clients.length >= 4) return c.send(S2C.ERROR, { msg: 'Room is full' });
+      if (r.clients.length >= 10) return c.send(S2C.ERROR, { msg: 'Room is full' });
       if (c.room) c.room.removeClient(c);
       r.addClient(c);
       log(`${c.name} joined room ${code}`);

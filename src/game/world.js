@@ -11,6 +11,41 @@ const randi = (a, b) => Math.floor(rand(a, b));
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
+const r1 = v => Math.round(v * 10) / 10;
+const r2 = v => Math.round(v * 100) / 100;
+
+// Uniform-grid spatial hash. Used for O(N) zombie separation and
+// O(B + Z) bullet/zombie hit tests, instead of O(N²) / O(B·Z).
+class SpatialHash {
+  constructor(cellSize) {
+    this.cellSize = cellSize;
+    this.cells = new Map();
+  }
+  clear() { this.cells.clear(); }
+  _key(cx, cy) { return ((cx + 1024) << 12) | (cy + 1024); }
+  insert(item) {
+    const cs = this.cellSize;
+    const k = this._key(Math.floor(item.x / cs), Math.floor(item.y / cs));
+    let arr = this.cells.get(k);
+    if (!arr) { arr = []; this.cells.set(k, arr); }
+    arr.push(item);
+  }
+  queryNear(x, y, radius, out) {
+    out.length = 0;
+    const cs = this.cellSize;
+    const minCx = Math.floor((x - radius) / cs);
+    const maxCx = Math.floor((x + radius) / cs);
+    const minCy = Math.floor((y - radius) / cs);
+    const maxCy = Math.floor((y + radius) / cs);
+    for (let cy = minCy; cy <= maxCy; cy++) {
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        const arr = this.cells.get(this._key(cx, cy));
+        if (arr) for (let i = 0; i < arr.length; i++) out.push(arr[i]);
+      }
+    }
+    return out;
+  }
+}
 
 const EMPTY_INPUT = Object.freeze({
   mx: 0, my: 0, ang: 0,
@@ -70,15 +105,18 @@ function refillMagsFromReserve(p) {
   }
 }
 
-function buildWaveComposition(n) {
+function buildWaveComposition(n, playerCount = 1) {
+  // Scale wave size with squad size so 10 players don't crush a wave built for 1.
+  // Sub-linear so a full squad isn't drowned: ~1 + 0.5·(P-1).
+  const scale = 1 + 0.5 * Math.max(0, playerCount - 1);
   const list = [];
   // Gentle ramp on waves 1–2 so players can learn the controls before the swarm.
-  const walkers  = n === 1 ? 6
-                 : n === 2 ? 9
-                 : Math.min(60, 6 + Math.floor(n * 2.2));
-  const runners  = n >= 3 ? Math.min(40, 2 + Math.floor((n - 2) * 1.6)) : 0;
-  const brutes   = n >= 5 ? Math.min(10, 1 + Math.floor((n - 5) / 2)) : 0;
-  const spitters = n >= 6 ? Math.min(20, 2 + Math.floor((n - 6) * 1.2)) : 0;
+  const walkers  = n === 1 ? Math.floor(6 * scale)
+                 : n === 2 ? Math.floor(9 * scale)
+                 : Math.min(140, Math.floor((6 + n * 2.2) * scale));
+  const runners  = n >= 3 ? Math.min(90,  Math.floor((2 + (n - 2) * 1.6) * scale)) : 0;
+  const brutes   = n >= 5 ? Math.min(24,  Math.floor((1 + (n - 5) / 2) * scale)) : 0;
+  const spitters = n >= 6 ? Math.min(50,  Math.floor((2 + (n - 6) * 1.2) * scale)) : 0;
   for (let i = 0; i < walkers; i++) list.push('walker');
   for (let i = 0; i < runners; i++) list.push('runner');
   for (let i = 0; i < brutes; i++) list.push('brute');
@@ -106,6 +144,12 @@ export class World {
     this.hitstopMs = 0;
     this.events = [];
     this.flags = { hillLowAnnounced: false, anyPlayerDownAnnounced: false };
+    // Spatial hash + scratch query buffer reused every tick (no GC churn).
+    // Cell size 80 covers brute diameter (52) and bullet homing fan-out cleanly.
+    this._zGrid = new SpatialHash(80);
+    this._qBuf = [];
+    // Hill HP scales with player count once the world starts.
+    this._hillBaseMaxHp = 1000;
   }
 
   // ----- Lifecycle -----
@@ -124,6 +168,10 @@ export class World {
     this.events.push({ type: 'player_left', id });
   }
   startGame() {
+    // Scale hill HP so 10 players don't trivially out-DPS a wave-1 hill drain.
+    const players = Math.max(1, this.players.size);
+    this.hill.maxHp = this._hillBaseMaxHp + (players - 1) * 200;
+    this.hill.hp = this.hill.maxHp;
     this.startWave(1);
   }
 
@@ -164,7 +212,7 @@ export class World {
   // ----- Waves -----
   startWave(n) {
     this.waveNum = n;
-    this.spawnQueue = buildWaveComposition(n);
+    this.spawnQueue = buildWaveComposition(n, Math.max(1, this.players.size));
     this.inWave = true;
     this.spawnTimerMs = 0;
     this.state = 'playing';
@@ -367,22 +415,27 @@ export class World {
     // Soften HP creep on early waves so a fresh pistol can still drop walkers in 3 shots.
     const hpWave = Math.max(0, this.waveNum - 2);
     const baseHp = cfg.hp + Math.floor(hpWave * (type === 'brute' ? 30 : 4));
+    const id = nextId();
+    const seed = rand(0, 1000);
+    const wobble = rand(0, TAU);
     this.zombies.push({
-      id: nextId(),
+      id,
       type, x, y, vx: 0, vy: 0,
       hp: baseHp, maxHp: baseHp,
       r: cfg.r,
       speed: cfg.speed * (1 + Math.min(0.4, Math.max(0, this.waveNum - 2) * 0.02)),
       flash: 0,
       atkCdMs: rand(0, cfg.atkCd),
-      wobble: rand(0, TAU),
+      wobble,
       angle: 0,
       target: null,
       rangedCdMs: rand(800, 2200),
-      seed: rand(0, 1000),
+      seed,
       droolMs: rand(800, 2400),
       lastHurtBy: null,
     });
+    // Static info for clients — sent once, then snapshots only carry dynamics.
+    this.events.push({ type: 'zombie_spawned', id, ztype: type, x: r1(x), y: r1(y), r: cfg.r, maxHp: baseHp, seed: r2(seed), wobble: r2(wobble) });
   }
   maybeSpawn(dt) {
     if (!this.inWave) return;
@@ -490,12 +543,28 @@ export class World {
       }
     }
 
-    // soft separation
-    const zs = this.zombies;
-    for (let i = 0; i < zs.length; i++) {
-      const a = zs[i]; if (a.dead) continue;
-      for (let j = i + 1; j < zs.length; j++) {
-        const b = zs[j]; if (b.dead) continue;
+    // Drop dead zombies first (in-place, no allocation).
+    let w = 0;
+    for (let i = 0; i < this.zombies.length; i++) {
+      if (!this.zombies[i].dead) this.zombies[w++] = this.zombies[i];
+    }
+    this.zombies.length = w;
+
+    // Rebuild spatial hash on live zombies. Used both for separation below
+    // and by updateBullets for hit/homing queries this tick.
+    const grid = this._zGrid;
+    const buf = this._qBuf;
+    grid.clear();
+    for (let i = 0; i < this.zombies.length; i++) grid.insert(this.zombies[i]);
+
+    // Soft separation — only check pairs whose cells overlap.
+    for (let i = 0; i < this.zombies.length; i++) {
+      const a = this.zombies[i];
+      const radius = a.r + 30; // 30 ≈ max other zombie radius
+      grid.queryNear(a.x, a.y, radius, buf);
+      for (let j = 0; j < buf.length; j++) {
+        const b = buf[j];
+        if (b.id <= a.id) continue; // process each pair once
         const dx = b.x - a.x, dy = b.y - a.y;
         const dd = dx*dx + dy*dy;
         const minR = a.r + b.r;
@@ -508,8 +577,6 @@ export class World {
         }
       }
     }
-
-    this.zombies = this.zombies.filter(z => !z.dead);
   }
 
   damageZombie(z, dmg, kx, ky, ownerId) {
@@ -532,9 +599,14 @@ export class World {
     this.events.push({ type:'zombie_died', id: z.id, ztype: z.type, x: z.x, y: z.y });
     // pickups
     const drop = Math.random();
-    if (drop < 0.85) this.pickups.push(makePickup(z.x, z.y, 'cash', cfg.cash));
-    else if (drop < 0.92) this.pickups.push(makePickup(z.x, z.y, 'health', 12));
-    else if (drop < 0.97) this.pickups.push(makePickup(z.x, z.y, 'ammo', 1));
+    let pk = null;
+    if (drop < 0.85) pk = makePickup(z.x, z.y, 'cash', cfg.cash);
+    else if (drop < 0.92) pk = makePickup(z.x, z.y, 'health', 12);
+    else if (drop < 0.97) pk = makePickup(z.x, z.y, 'ammo', 1);
+    if (pk) {
+      this.pickups.push(pk);
+      this.events.push({ type: 'pickup_spawned', id: pk.id, ptype: pk.type, value: pk.value, x: r1(pk.x), y: r1(pk.y) });
+    }
   }
 
   hurtPlayer(p, dmg) {
@@ -567,23 +639,29 @@ export class World {
     // Hit-magnet: near-misses still count as hits. Bullet flies straight,
     // but its effective hit radius is z.r + MAGNET_R.
     const MAGNET_R = 16;
+    const grid = this._zGrid;
+    const buf = this._qBuf;
+    const hasZombies = this.zombies.length > 0;
     for (let i = arr.length - 1; i >= 0; i--) {
       const b = arr[i];
       b.x += b.vx * dt; b.y += b.vy * dt;
       b.ttl -= dt;
       let removed = false;
-      for (const z of this.zombies) {
-        if (z.dead) continue;
-        if (b.hits.has(z.id)) continue;
-        const dx = z.x - b.x, dy = z.y - b.y;
-        const hitR = z.r + MAGNET_R;
-        if (dx*dx + dy*dy < hitR * hitR) {
-          const ang = Math.atan2(b.vy, b.vx);
-          const k = 240 / Math.max(1, z.r) * 2;
-          this.damageZombie(z, b.dmg, Math.cos(ang) * k, Math.sin(ang) * k, b.ownerId);
-          b.hits.add(z.id);
-          if (b.pierce > 0) { b.pierce -= 1; b.dmg *= 0.85; }
-          else { arr.splice(i, 1); removed = true; break; }
+      if (hasZombies) {
+        grid.queryNear(b.x, b.y, 30 + MAGNET_R, buf);
+        for (let q = 0; q < buf.length; q++) {
+          const z = buf[q];
+          if (z.dead || b.hits.has(z.id)) continue;
+          const dx = z.x - b.x, dy = z.y - b.y;
+          const hitR = z.r + MAGNET_R;
+          if (dx*dx + dy*dy < hitR * hitR) {
+            const ang = Math.atan2(b.vy, b.vx);
+            const k = 240 / Math.max(1, z.r) * 2;
+            this.damageZombie(z, b.dmg, Math.cos(ang) * k, Math.sin(ang) * k, b.ownerId);
+            b.hits.add(z.id);
+            if (b.pierce > 0) { b.pierce -= 1; b.dmg *= 0.85; }
+            else { arr.splice(i, 1); removed = true; break; }
+          }
         }
       }
       if (removed) continue;
@@ -674,38 +752,59 @@ export class World {
   }
 
   // ----- Snapshot for network sync -----
+  // Lean: drop bullets/enemyBullets entirely (clients simulate visuals from
+  // 'fire' / 'spit' events), drop player name/color/r (sent at join), drop
+  // zombie seed/wobble/maxHp/r/type (sent in 'zombie_spawned'), drop pickup
+  // type/value (sent in 'pickup_spawned'). Numbers rounded to cut JSON bytes.
   snapshot() {
+    const players = [];
+    for (const p of this.players.values()) {
+      players.push({
+        id: p.id,
+        dead: p.dead, ready: p.ready,
+        x: r1(p.x), y: r1(p.y),
+        vx: r1(p.vx), vy: r1(p.vy),
+        hp: r1(p.hp), maxHp: p.maxHp,
+        angle: r2(p.angle),
+        weapon: p.weapon,
+        owned: p.owned, mag: p.mag, ammoReserve: p.ammoReserve,
+        upgrades: p.upgrades, score: p.score, kills: p.kills,
+        muzzleFlash: p.muzzleFlash > 0 ? r2(p.muzzleFlash) : 0,
+        hurtFlash: p.hurtFlash > 0 ? r2(p.hurtFlash) : 0,
+        iframesMs: p.iframesMs > 0 ? r2(p.iframesMs) : 0,
+        reloadMs: p.reloadMs | 0,
+        fireCdMs: p.fireCdMs | 0,
+        stamina: r2(p.stamina), maxStamina: p.maxStamina,
+        dodgeMs: p.dodgeMs > 0 ? r2(p.dodgeMs) : 0,
+      });
+    }
+    const zombies = new Array(this.zombies.length);
+    for (let i = 0; i < this.zombies.length; i++) {
+      const z = this.zombies[i];
+      zombies[i] = {
+        id: z.id,
+        x: r1(z.x), y: r1(z.y),
+        hp: r1(z.hp),
+        angle: r2(z.angle),
+        flash: z.flash > 0 ? 1 : 0,
+      };
+    }
+    const pickups = new Array(this.pickups.length);
+    for (let i = 0; i < this.pickups.length; i++) {
+      const it = this.pickups[i];
+      pickups[i] = { id: it.id, x: r1(it.x), y: r1(it.y), life: r2(it.life) };
+    }
     return {
       tickN: this.tickN,
       state: this.state,
       cash: this.cash,
-      hill: { hp: this.hill.hp, maxHp: this.hill.maxHp },
+      hill: { hp: r1(this.hill.hp), maxHp: this.hill.maxHp },
       waveNum: this.waveNum,
       inWave: this.inWave,
       remainingZombies: this.zombies.length + this.spawnQueue.length,
-      players: [...this.players.values()].map(p => ({
-        id: p.id, name: p.name, color: p.color, dead: p.dead, ready: p.ready,
-        x: p.x, y: p.y, vx: p.vx, vy: p.vy, hp: p.hp, maxHp: p.maxHp, r: p.r, angle: p.angle,
-        weapon: p.weapon, owned: p.owned, mag: p.mag, ammoReserve: p.ammoReserve,
-        upgrades: p.upgrades, score: p.score, kills: p.kills,
-        muzzleFlash: p.muzzleFlash, hurtFlash: p.hurtFlash, iframesMs: p.iframesMs,
-        reloadMs: p.reloadMs, fireCdMs: p.fireCdMs,
-        stamina: p.stamina, maxStamina: p.maxStamina, dodgeMs: p.dodgeMs,
-      })),
-      zombies: this.zombies.map(z => ({
-        id: z.id, type: z.type, x: z.x, y: z.y, hp: z.hp, maxHp: z.maxHp,
-        r: z.r, angle: z.angle, flash: z.flash, seed: z.seed, wobble: z.wobble,
-      })),
-      bullets: this.bullets.map(b => ({
-        id: b.id, x: b.x, y: b.y, vx: b.vx, vy: b.vy,
-        color: b.color, tracer: b.tracer,
-      })),
-      enemyBullets: this.enemyBullets.map(b => ({
-        id: b.id, x: b.x, y: b.y, color: b.color, r: b.r,
-      })),
-      pickups: this.pickups.map(it => ({
-        id: it.id, x: it.x, y: it.y, type: it.type, value: it.value, life: it.life,
-      })),
+      players,
+      zombies,
+      pickups,
     };
   }
 }
