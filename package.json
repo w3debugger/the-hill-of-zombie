@@ -1,0 +1,23 @@
+{
+  "name": "hill-of-zombie",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Top-down co-op zombie survival shooter",
+  "scripts": {
+    "dev": "concurrently -k -n SERVER,CLIENT -c yellow,cyan \"npm:server\" \"npm:client\"",
+    "client": "vite",
+    "server": "node server/index.js",
+    "build": "vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "preact": "^10.22.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.9.1",
+    "concurrently": "^8.2.2",
+    "vite": "^5.4.8",
+    "ws": "^8.18.0"
+  }
+}
