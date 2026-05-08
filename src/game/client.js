@@ -54,8 +54,8 @@ export class GameClient {
     // Cinematic kill-cam pacing
     this.localKillCount = 0;
     this.lastCinematicAt = -1e9;
-    this.killCamEvery = 6;             // fire on every Nth local-player kill
-    this.killCamCooldownMs = 8000;     // never fire more often than this
+    this.killCamEvery = 8;             // fire on every Nth local-player kill
+    this.killCamCooldownMs = 12000;    // never fire more often than this (game freezes during cinematic)
   }
 
   // Solo
@@ -121,8 +121,12 @@ export class GameClient {
 
     if (this.localWorld) {
       // ----- Solo: authoritative simulation runs locally -----
-      const events = this.localWorld.step(dt, { [this.localPlayerId]: inputState });
-      this._handleEvents(events);
+      // Freeze the world while the kill-cam plays so zombies aren't chewing the
+      // tower while the camera is busy admiring a headshot.
+      if (!this.renderer.isCinematicActive()) {
+        const events = this.localWorld.step(dt, { [this.localPlayerId]: inputState });
+        this._handleEvents(events);
+      }
       this.world = this.localWorld.live();
       this._processStateTransitions();
     } else if (this.net) {

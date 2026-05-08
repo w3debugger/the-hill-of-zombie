@@ -27,7 +27,7 @@ function saveProfile(p) {
 }
 
 export function App() {
-  const [screen, setScreen] = useState(() => (localStorage.getItem('hoz.seenIntro') ? 'menu' : 'intro'));
+  const [screen, setScreen] = useState(() => (localStorage.getItem('hoz.seenIntro.v2') ? 'menu' : 'intro'));
   const [profile, setProfileState] = useState(loadProfile);
   const setProfile = (p) => { saveProfile(p); setProfileState(p); };
   const [mode, setMode] = useState(null);            // 'solo' | 'mp'
@@ -49,7 +49,7 @@ export function App() {
 
   // ---- Intro skip ----
   const finishIntro = () => {
-    localStorage.setItem('hoz.seenIntro', '1');
+    localStorage.setItem('hoz.seenIntro.v2', '1');
     setScreen('menu');
   };
 

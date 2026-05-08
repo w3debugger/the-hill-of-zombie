@@ -39,7 +39,7 @@ export function MainMenu({ profile, setProfile, onSolo, onHost, onJoin, error, c
     <div class="overlay">
       <div class="menu-card big">
         <h1 class="title">THE HILL OF ZOMBIE</h1>
-        <p class="subtitle">Hold the signal tower. Wait for extraction.</p>
+        <p class="subtitle">One sniper. One bunker tower. Hold until daybreak.</p>
 
         <div class="profile-row">
           <div class="field">
@@ -185,9 +185,9 @@ export function GameOver({ stats, onRetry, onMenu }) {
   return (
     <div class="overlay solid">
       <div class="menu-card big">
-        <h1 class={`title ${stats.won ? 'win' : 'dead'}`}>{stats.won ? 'EXTRACTION COMPLETE' : 'TOWER LOST'}</h1>
+        <h1 class={`title ${stats.won ? 'win' : 'dead'}`}>{stats.won ? 'DAYBREAK' : 'TOWER OVERRUN'}</h1>
         <p class="subtitle">{stats.won
-          ? 'You held the line. Hilltop Echo broadcasts on.'
+          ? 'Sun’s up. The dead are pulling back. Hilltop Echo holds.'
           : 'The signal goes dark. The convoys will not make the coast.'}</p>
         <div class="stats">
           <div><span class="lbl">Waves survived</span><span>{stats.wave}</span></div>

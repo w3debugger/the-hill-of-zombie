@@ -141,7 +141,7 @@ export class World {
     this.bullets = [];
     this.enemyBullets = [];
     this.pickups = [];
-    this.hill = { hp: 1000, maxHp: 1000 };
+    this.hill = { hp: 2000, maxHp: 2000 };
     this.cash = 0;
     this.waveNum = 0;
     this.inWave = false;
@@ -155,7 +155,7 @@ export class World {
     this._zGrid = new SpatialHash(80);
     this._qBuf = [];
     // Hill HP scales with player count once the world starts.
-    this._hillBaseMaxHp = 1000;
+    this._hillBaseMaxHp = 2000;
   }
 
   // ----- Lifecycle -----
@@ -300,7 +300,7 @@ export class World {
       else if (item.key === 'dmg') p.dmgMult *= 1.20;
       p.upgrades[item.key]++;
     } else if (item.type === 'repair') {
-      this.hill.hp = Math.min(this.hill.maxHp, this.hill.hp + 400);
+      this.hill.hp = Math.min(this.hill.maxHp, this.hill.hp + 700);
     }
     this.cash -= price;
     this.events.push({ type: 'buy_ok', playerId: p.id, item: item.id });

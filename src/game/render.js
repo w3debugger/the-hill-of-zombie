@@ -143,15 +143,15 @@ export class Renderer {
   setLocalPlayer(id) { this.localPlayerId = id; }
   addShake(amount) { this.cam.shake = Math.min(1, this.cam.shake + amount); }
 
-  // Cinematic kill cam. Phases (total ~1100ms):
-  //  0..160ms   IN: zoom 1 → 2.6, letterbox 0 → 1, camera lerps to halfway
-  //  160..820ms HOLD: stay zoomed, slow-mo on particles, blood spreads outward
-  //  820..1100ms OUT: zoom & letterbox back to 1
+  // Cinematic kill cam. Phases (total ~1700ms — solo mode pauses world during it).
+  //  0..220ms    IN:   zoom 1 → 2.5, camera lerps to halfway
+  //  220..1400ms HOLD: stay zoomed, deep slow-mo on particles, blood spreads outward
+  //  1400..1700ms OUT: zoom back to 1
   triggerKillCinematic(opts) {
     if (this.cinematic) return; // one at a time; cooldown is enforced by caller
     const { x, y, killerX, killerY, ztype = 'walker', weapon = 'pistol' } = opts || {};
     this.cinematic = {
-      age: 0, dur: 1.1,
+      age: 0, dur: 1.7,
       x, y, kx: killerX, ky: killerY,
       ztype, weapon,
       phase: 'in',
@@ -172,9 +172,9 @@ export class Renderer {
     if (!this.cinematic) return 1;
     // Slow-mo during the hold phase, ramp out at the tail.
     const t = this.cinematic.age;
-    if (t < 0.16) return lerp(1, 0.18, t / 0.16);
-    if (t < 0.82) return 0.18 + 0.06 * Math.sin(t * 14); // tiny pulse
-    return lerp(0.22, 1, (t - 0.82) / 0.28);
+    if (t < 0.22) return lerp(1, 0.10, t / 0.22);
+    if (t < 1.40) return 0.10 + 0.04 * Math.sin(t * 14); // tiny pulse
+    return lerp(0.14, 1, (t - 1.40) / 0.30);
   }
 
   // ----- Effects API (called by client in response to events) -----
@@ -260,9 +260,9 @@ export class Renderer {
         const focusX = c.x * 0.7 + (c.kx ?? c.x) * 0.3;
         const focusY = c.y * 0.7 + (c.ky ?? c.y) * 0.3;
         // Blend: 0..1 in, hold at 1, 1..0 out
-        if (c.age < 0.16)      targetBlend = c.age / 0.16;
-        else if (c.age < 0.82) targetBlend = 1;
-        else                   targetBlend = Math.max(0, 1 - (c.age - 0.82) / 0.28);
+        if (c.age < 0.22)      targetBlend = c.age / 0.22;
+        else if (c.age < 1.40) targetBlend = 1;
+        else                   targetBlend = Math.max(0, 1 - (c.age - 1.40) / 0.30);
         const k = ease(targetBlend);
         targetX = lerp(targetX, focusX, k);
         targetY = lerp(targetY, focusY, k);
@@ -294,7 +294,7 @@ export class Renderer {
 
     // During cinematic hold phase, schedule periodic blood-spread bursts so
     // the splatter visibly grows over the slow-mo window.
-    if (this.cinematic && this.cinematic.age > 0.16 && this.cinematic.age < 0.82) {
+    if (this.cinematic && this.cinematic.age > 0.22 && this.cinematic.age < 1.40) {
       this.bloodSpreadAccum += dt;
       const interval = 0.06;
       while (this.bloodSpreadAccum >= interval) {

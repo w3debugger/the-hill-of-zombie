@@ -4,7 +4,7 @@ export const TAU = Math.PI * 2;
 export const HILL_R = 220;
 export const HILL_CORE_R = 80;
 export const ARENA_R = 1700;
-export const HILL_DRAIN_DPS = 14;
+export const HILL_DRAIN_DPS = 10;
 
 export const PLAYER_COLORS = ['#5cc8ff', '#ff7d7d', '#9affb6', '#ffd96a'];
 
@@ -29,55 +29,55 @@ export const INTRO_TEXT = [
   { kind: 'header', text: 'YEAR 2031' },
   { kind: 'p', text: 'Six weeks ago the Veridian-7 strain breached containment at Fort Sebring.' },
   { kind: 'p', text: 'Within seventy-two hours the eastern seaboard went dark.' },
-  { kind: 'p', text: 'The infected don’t shamble. They hunt. They organize. They listen.' },
+  { kind: 'p', text: 'Most of the turned forgot how to think. You did not. Lucky you.' },
   { kind: 'space' },
   { kind: 'header', text: 'HILLTOP ECHO' },
-  { kind: 'p', text: 'A relay tower on a hill outside Black Ridge — the last working transmitter for sixty kilometers.' },
-  { kind: 'p', text: 'For as long as it broadcasts, civilian convoys can navigate the dead zones to the coast.' },
-  { kind: 'p', text: 'For as long as it broadcasts, the choppers know where to come.' },
+  { kind: 'p', text: 'A bunker tower outside Black Ridge — three feet of poured concrete and war-era armor plating.' },
+  { kind: 'p', text: 'They built it to ride out the bomb. It did. Nothing on this earth gets through those walls.' },
+  { kind: 'p', text: 'The trick is keeping the dead off the roof.' },
   { kind: 'space' },
   { kind: 'header', text: 'YOU' },
-  { kind: 'p', text: 'Sergeant Marcus Vance. Fourth Light Infantry. Last man on the hill.' },
-  { kind: 'p', text: 'Captain Reyes is on the radio. Extraction is on the way.' },
-  { kind: 'p', text: 'Hold until they arrive. That is the entire mission.' },
+  { kind: 'p', text: 'You used to be Sergeant Marcus Vance. Most of you still is.' },
+  { kind: 'p', text: 'The rifle. The hands. The will. The hunger, too — but you manage.' },
+  { kind: 'p', text: 'The rest of your kind are coming up the slope. Pick them off. Hold the tower until daybreak.' },
 ];
 
 // Wave names + Reyes radio chatter, keyed by wave number / event.
 // Each entry: { wave, when: 'start'|'mid'|'end', from, text, sub? }
 export const RADIO_SCRIPT = {
   start: {
-    1:  [{ from: 'REYES', text: 'Vance, Reyes. Movement on the south slope. Get to your position.' }],
-    2:  [{ from: 'REYES', text: 'Runners this time. They smell us. Don’t let them flank.' }],
-    3:  [{ from: 'REYES', text: 'Bigger pack inbound. Conserve rifle ammo if you have it.' }],
-    4:  [{ from: 'REYES', text: 'Heavies in the next group. Center of mass won’t cut it. Hit them hard.' }],
-    5:  [{ from: 'REYES', text: 'Spitters in the treeline. Keep moving — they zero on standing targets.' }],
-    6:  [{ from: 'REYES', text: 'Hilltop, you’re holding. Convoy four made it through because of you.' }],
-    7:  [{ from: 'REYES', text: 'They’re stacking, Vance. I’ve never seen them coordinate like this.' }],
-    8:  [{ from: 'REYES', text: 'Choppers are spinning up. Twelve minutes. Don’t you dare go quiet on me.' }],
+    1:  [{ from: 'REYES', text: 'Vance — Reyes. Movement on the south slope. Up the tower. Now.' }],
+    2:  [{ from: 'REYES', text: 'Runners this time. They smell their own kin and they don’t care. Don’t let them flank.' }],
+    3:  [{ from: 'REYES', text: 'Bigger pack inbound. That rifle’s the only thing keeping the hill quiet.' }],
+    4:  [{ from: 'REYES', text: 'Heavies in the next group. Center of mass won’t drop them. Hit them hard.' }],
+    5:  [{ from: 'REYES', text: 'Spitters in the treeline. They zero on standing targets — keep moving.' }],
+    6:  [{ from: 'REYES', text: 'Tower’s still on the air. Convoy four pushed through because of you.' }],
+    7:  [{ from: 'REYES', text: 'They’re stacking, Vance. The dead don’t coordinate. These ones do.' }],
+    8:  [{ from: 'REYES', text: 'Three hours till sunrise. Don’t you dare go quiet on me.' }],
     9:  [{ from: 'REYES', text: 'This is the big push. Whatever you have left, spend it now.' }],
-    10: [{ from: 'REYES', text: 'Final wave. Final wave! Hold the hill, soldier — birds are inbound!' }],
+    10: [{ from: 'REYES', text: 'Final wave. Hold that tower till the sun’s up — light burns them off the slope.' }],
   },
   end: {
-    1:  [{ from: 'REYES', text: 'Clean kill. Reload. There’s more.' }],
-    3:  [{ from: 'REYES', text: 'Convoy two cleared the bridge. They owe you a beer.' }],
-    5:  [{ from: 'REYES', text: 'You’re halfway. Stay sharp, the worst is coming.' }],
-    7:  [{ from: 'REYES', text: 'Field hospital says you bought them four hours. That’s lives, Vance. That’s lives.' }],
+    1:  [{ from: 'REYES', text: 'Clean shot. Reload. There’s more.' }],
+    3:  [{ from: 'REYES', text: 'Convoy two cleared the bridge. Your signal is keeping people alive.' }],
+    5:  [{ from: 'REYES', text: 'Halfway to dawn. Stay sharp — the worst is coming.' }],
+    7:  [{ from: 'REYES', text: 'Field hospital says you bought them four hours. That’s lives, Vance. Yours included.' }],
     9:  [{ from: 'REYES', text: 'One more, brother. Just one more.' }],
-    10: [{ from: 'REYES', text: 'Birds on the deck. We see you. Welcome home, Sergeant.' }],
+    10: [{ from: 'REYES', text: 'Sun’s up. Dead are pulling back. Hilltop Echo holds.' }],
   },
   // Triggered when hill HP first drops below thresholds
-  hillLow: { from: 'REYES', text: 'Tower’s taking damage. Push them off it before we lose signal!' },
+  hillLow: { from: 'REYES', text: 'Something’s on the tower roof. Knock it off before they crack a hatch.' },
   // Triggered when a player dies
-  playerDown: { from: 'REYES', text: 'Man down on the hill! Can anyone get to them?!' },
+  playerDown: { from: 'REYES', text: 'Vance is down on the tower! Anyone — anyone get to him?!' },
   // Final triumph (after wave 10 cleared)
   victory: [
     { from: 'REYES', text: 'All units — Hilltop Echo holds. Hilltop Echo holds!' },
-    { from: 'PILOT', text: 'Sergeant. Get on the bird. You’re going home.' },
+    { from: 'REYES', text: 'Sun’s up, Sergeant. You bought us another day.' },
   ],
   // Game over
   defeat: [
     { from: 'REYES', text: 'Vance. Vance, talk to me. Vance!' },
-    { from: 'PILOT', text: 'Tower’s gone dark. Aborting approach.' },
+    { from: 'REYES', text: 'Tower’s gone silent. They’ve taken the hill.' },
   ],
 };
 
@@ -92,7 +92,7 @@ export const WAVE_NAMES = {
   7: 'NIGHTFALL',
   8: 'THE TIDE',
   9: 'LAST STAND',
-  10: 'EXFIL',
+  10: 'DAYBREAK',
 };
 
 // Shop catalog. priceFn lets cost scale with upgrade level.
@@ -106,7 +106,7 @@ export const SHOP_ITEMS = [
   { id:'maxhp',       name:'BODY ARMOR',   desc:'+25 max HP. Heal to full.',           type:'upgrade', key:'hp',    max:3, base:200, step:150 },
   { id:'speed',       name:'BOOTS',        desc:'+15% movement speed.',                type:'upgrade', key:'speed', max:3, base:240, step:160 },
   { id:'dmg',         name:'HOLLOW POINT', desc:'+20% bullet damage.',                 type:'upgrade', key:'dmg',   max:3, base:320, step:200 },
-  { id:'repair',      name:'BARRICADES',   desc:'Repair the hill +400 HP.',            price:180, type:'repair' },
+  { id:'repair',      name:'BARRICADES',   desc:'Reinforce the tower +700 HP.',         price:180, type:'repair' },
 ];
 
 export function shopPrice(item, ownedLevel = 0) {
