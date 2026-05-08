@@ -120,9 +120,31 @@ export class GameClient {
     if (!this.world || !this.world.players) return 0;
     const lp = this.world.players.find(p => p.id === this.localPlayerId);
     if (!lp) return 0;
+    // Touch-mode aim: pick nearest zombie (auto-aim), then fall back to
+    // joystick direction, then last facing angle.
+    if (this.input.touch.active) {
+      const nz = this._nearestZombie(lp.x, lp.y, 700);
+      if (nz) return Math.atan2(nz.y - lp.y, nz.x - lp.x);
+      const t = this.input.touch;
+      if (t.joyX !== 0 || t.joyY !== 0) return Math.atan2(t.joyY, t.joyX);
+      return lp.angle ?? 0;
+    }
     const mouse = this.input.mouse;
     const w = this.renderer.screenToWorld(mouse.sx, mouse.sy);
     return Math.atan2(w.y - lp.y, w.x - lp.x);
+  }
+
+  _nearestZombie(x, y, maxDist) {
+    const zs = this.world?.zombies;
+    if (!zs || zs.length === 0) return null;
+    let best = null, bestD = maxDist * maxDist;
+    for (let i = 0; i < zs.length; i++) {
+      const z = zs[i];
+      const dx = z.x - x, dy = z.y - y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = z; }
+    }
+    return best;
   }
 
   _processStateTransitions() {

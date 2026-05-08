@@ -3,7 +3,8 @@ import { GameClient } from '../game/client.js';
 import { NetClient } from '../net/client.js';
 import { C2S, S2C } from '../net/protocol.js';
 import { Intro, MainMenu, Lobby, GameOver, ConnectingOverlay } from './Screens.jsx';
-import { HUD, Shop, Pause, RadioStack, WaveBanner, HitVignette } from './InGame.jsx';
+import { HUD, Shop, Pause, RadioStack, WaveBanner, HitVignette, TouchControls } from './InGame.jsx';
+import { IS_TOUCH } from '../game/input.js';
 import { PLAYER_COLORS } from '../game/data.js';
 
 const WS_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL)
@@ -250,6 +251,7 @@ export function App() {
           {banner && <WaveBanner banner={banner} />}
           <RadioStack messages={radio} />
           <HitVignette pulseKey={hurtPulse} />
+          {IS_TOUCH && gameState === 'playing' && !paused && <TouchControls gameRef={gameRef} />}
           {gameState === 'shop' && <Shop gameRef={gameRef} />}
           {paused && <Pause onResume={() => setPaused(false)} onQuit={quitToMenu} />}
           {(gameState === 'gameover' || gameState === 'victory') && endStats && (

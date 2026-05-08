@@ -26,6 +26,10 @@ html, body, #root {
   overflow: hidden;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  touch-action: none;
+  overscroll-behavior: none;
 }
 
 #root { position: relative; }
@@ -558,6 +562,8 @@ button { font-family: inherit; }
 }
 .slot.owned { opacity: 1; color: var(--ink); }
 .slot.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.slot { pointer-events: auto; cursor: pointer; user-select: none; }
+.slot.owned { min-width: 22px; min-height: 22px; }
 
 /* =========================================
    PLAYERS OVERLAY (Tab)
@@ -852,6 +858,142 @@ button { font-family: inherit; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* =========================================
+   TOUCH CONTROLS (mobile/tablet)
+   ========================================= */
+.touch-controls {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* Left thumbstick zone — covers the bottom-left quadrant so the player can
+   plant a thumb anywhere comfortable. The visible base recenters to where
+   the finger lands. */
+.touch-stick {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 45vw;
+  max-width: 360px;
+  height: 50vh;
+  max-height: 360px;
+  pointer-events: auto;
+  touch-action: none;
+}
+.touch-stick-base {
+  position: absolute;
+  left: 90px;
+  top: 50%;
+  width: 160px;
+  height: 160px;
+  margin-left: -80px;
+  margin-top: -80px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(20,24,29,0.55) 0%, rgba(10,13,16,0.35) 70%, rgba(10,13,16,0) 100%);
+  border: 2px solid rgba(255,255,255,0.18);
+  box-shadow: inset 0 0 32px rgba(0,0,0,0.55), 0 6px 22px rgba(0,0,0,0.35);
+  display: grid;
+  place-items: center;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.touch-stick-base.active { opacity: 0.95; border-color: rgba(255,255,255,0.32); }
+.touch-stick-arrows {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.ts-arrow {
+  position: absolute;
+  font-size: 14px;
+  color: rgba(255,255,255,0.45);
+  letter-spacing: 0;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.ts-arrow.up { top: 8px; }
+.ts-arrow.down { bottom: 8px; }
+.ts-arrow.left { left: 10px; }
+.ts-arrow.right { right: 10px; }
+.touch-stick-knob {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffffff20 0%, #ffffff08 35%, #00000040 80%);
+  border: 2px solid rgba(255,255,255,0.5);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.2);
+  pointer-events: none;
+  will-change: transform;
+}
+.touch-stick-hint {
+  position: absolute;
+  left: 90px;
+  bottom: 12px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.32em;
+  color: rgba(255,255,255,0.45);
+  pointer-events: none;
+}
+
+/* Right fire button */
+.touch-fire {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  pointer-events: auto;
+  touch-action: none;
+  background: radial-gradient(circle at 35% 30%, #4a1a14 0%, #2a0d0a 60%, #180605 100%);
+  border: 3px solid #ff6a3c;
+  color: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  gap: 0;
+  padding: 0;
+  box-shadow:
+    0 0 28px rgba(255, 90, 60, 0.45),
+    inset 0 0 22px rgba(255, 110, 60, 0.18),
+    0 6px 20px rgba(0,0,0,0.55);
+  transition: transform 0.08s ease, box-shadow 0.12s ease, background 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.touch-fire svg { display: block; filter: drop-shadow(0 0 6px rgba(255,90,40,0.55)); }
+.touch-fire-label {
+  position: absolute;
+  bottom: 8px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.32em;
+  color: #ffd6b0;
+  text-shadow: 0 1px 2px #000;
+}
+.touch-fire.active,
+.touch-fire:active {
+  transform: scale(0.94);
+  background: radial-gradient(circle at 35% 30%, #ff5a3c 0%, #b6371d 60%, #5a1306 100%);
+  box-shadow:
+    0 0 40px rgba(255, 110, 60, 0.85),
+    inset 0 0 24px rgba(255, 200, 120, 0.45),
+    0 4px 14px rgba(0,0,0,0.55);
+}
+
+/* On true desktop (no coarse pointer at all) we don't even render the
+   component — IS_TOUCH gates it from App.jsx. As a safety net, hide it
+   when the device has *only* fine pointers. iPad with a trackpad still
+   reports `any-pointer: coarse` so this leaves it visible there. */
+@media not all and (any-pointer: coarse) {
+  .touch-controls { display: none; }
+}
+
+/* =========================================
    RESPONSIVE
    ========================================= */
 @media (max-width: 820px) {
@@ -867,4 +1009,84 @@ button { font-family: inherit; }
   .radio-stack { width: 90vw; bottom: 110px; }
   .wb-num { font-size: 40px; }
   .players-overlay { min-width: 86vw; }
+}
+
+/* iPhone / small phones: tighten the HUD so it doesn't crowd the canvas
+   and leave room above the touch stick + fire button. */
+@media (max-width: 640px) {
+  .hud-row { padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+                     max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+             gap: 6px; }
+  .hud-row.top { gap: 6px; }
+  .hud-row.bottom {
+    /* lift HUD above the touch UI — keep bars + weapon panel readable */
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding-bottom: max(180px, calc(160px + env(safe-area-inset-bottom)));
+  }
+  .badge { min-width: 0; padding: 3px 6px; }
+  .badge .lbl { font-size: 8px; letter-spacing: 0.14em; }
+  .badge .val { font-size: 14px; }
+  .mute-btn { width: 34px; height: 34px; font-size: 14px; }
+  .bars { min-width: 0; width: 100%; gap: 4px; }
+  .bar-track { height: 8px; }
+  .bar-label { font-size: 8px; letter-spacing: 0.14em; margin-bottom: 2px; }
+  .weapon-panel {
+    min-width: 0;
+    padding: 6px 10px;
+    text-align: left;
+    border-right: none;
+    border-left: 3px solid var(--accent);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 8px;
+  }
+  .weapon-name { font-size: 12px; letter-spacing: 0.1em; }
+  .weapon-ammo { font-size: 18px; text-align: right; grid-column: 2; grid-row: 1 / span 2; }
+  .weapon-slots { grid-column: 1 / span 2; margin-top: 2px; justify-content: flex-start; gap: 4px; }
+  .slot { font-size: 9px; padding: 2px 5px; }
+  .radio-stack { bottom: 200px; width: 92vw; font-size: 12px; }
+  .radio-msg { font-size: 12px; padding: 6px 10px; }
+  .wb-num { font-size: 32px; letter-spacing: 0.12em; }
+  .wb-name { font-size: 14px; letter-spacing: 0.4em; }
+
+  /* Smaller touch UI on phones */
+  .touch-stick-base { width: 130px; height: 130px; margin-left: -65px; margin-top: -65px; left: 80px; }
+  .touch-stick-knob { width: 60px; height: 60px; }
+  .touch-stick-hint { left: 80px; bottom: max(8px, env(safe-area-inset-bottom)); }
+  .touch-fire {
+    width: 96px; height: 96px;
+    right: max(18px, env(safe-area-inset-right));
+    bottom: max(18px, env(safe-area-inset-bottom));
+  }
+  .touch-fire svg { width: 44px; height: 44px; }
+  .touch-fire-label { font-size: 9px; bottom: 6px; }
+}
+
+/* iPad / tablet portrait: keep the HUD on one row but use safe-area insets
+   so the stick + fire don't sit under the home indicator. */
+@media (min-width: 641px) and (max-width: 1180px) {
+  .hud-row { padding-left: max(14px, env(safe-area-inset-left));
+             padding-right: max(14px, env(safe-area-inset-right)); }
+  .hud-row.top { padding-top: max(14px, env(safe-area-inset-top)); }
+  .hud-row.bottom { padding-bottom: max(120px, calc(110px + env(safe-area-inset-bottom))); }
+  .touch-stick-base { left: 110px; }
+  .touch-stick-hint { left: 110px; bottom: max(14px, env(safe-area-inset-bottom)); }
+  .touch-fire {
+    right: max(36px, env(safe-area-inset-right));
+    bottom: max(36px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Landscape phones: keep HUD compact on tiny heights */
+@media (max-height: 500px) and (orientation: landscape) {
+  .hud-row.top { padding: 6px 12px; }
+  .hud-row.bottom { padding-bottom: 8px; flex-direction: row; }
+  .badge { padding: 2px 6px; min-width: 0; }
+  .badge .val { font-size: 13px; }
+  .bars { min-width: 180px; }
+  .touch-stick-base { left: 80px; }
+  .touch-fire { width: 96px; height: 96px; }
 }

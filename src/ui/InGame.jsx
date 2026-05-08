@@ -121,7 +121,11 @@ export function HUD({ gameRef }) {
           <div class="weapon-ammo" ref={refs.weaponAmmo}>∞</div>
           <div class="weapon-slots" ref={refs.slots}>
             {WEAPON_ORDER.map((k, i) => (
-              <div class={`slot ${k === 'pistol' ? 'owned active' : ''}`} key={k}>{i + 1}</div>
+              <div
+                class={`slot ${k === 'pistol' ? 'owned active' : ''}`}
+                key={k}
+                onClick={() => { const g = gameRef.current; if (g) g.input.weaponEdge = k; }}
+              >{i + 1}</div>
             ))}
           </div>
         </div>
@@ -259,6 +263,128 @@ export function Pause({ onResume, onQuit }) {
         <button class="btn primary big-btn" onClick={onResume}>RESUME</button>
         <button class="btn ghost" onClick={onQuit}>QUIT TO MENU</button>
       </div>
+    </div>
+  );
+}
+
+// ---------- TOUCH CONTROLS ----------
+// Left side: floating thumbstick (the stick origin follows the first finger
+// that lands in the joystick zone). Right side: fire button. Both use
+// PointerEvents so a single finger on each side works simultaneously.
+export function TouchControls({ gameRef }) {
+  const stickZoneRef = useRef(null);
+  const knobRef = useRef(null);
+  const baseRef = useRef(null);
+  const fireBtnRef = useRef(null);
+  const stateRef = useRef({ joyId: null, ox: 0, oy: 0, fireId: null });
+
+  useEffect(() => {
+    const zone = stickZoneRef.current;
+    const knob = knobRef.current;
+    const base = baseRef.current;
+    const fireBtn = fireBtnRef.current;
+    if (!zone || !knob || !base || !fireBtn) return;
+
+    const MAX = 60; // joystick travel radius in px
+
+    const setKnob = (dx, dy) => {
+      const m = Math.hypot(dx, dy);
+      const k = m > MAX ? MAX / m : 1;
+      const kx = dx * k, ky = dy * k;
+      knob.style.transform = `translate(${kx}px, ${ky}px)`;
+      const nx = kx / MAX, ny = ky / MAX;
+      gameRef.current?.input.setJoystick(nx, ny);
+    };
+
+    const onZoneDown = (e) => {
+      if (stateRef.current.joyId !== null) return;
+      e.preventDefault();
+      const id = e.pointerId;
+      stateRef.current.joyId = id;
+      const r = zone.getBoundingClientRect();
+      const ox = e.clientX - r.left;
+      const oy = e.clientY - r.top;
+      stateRef.current.ox = ox;
+      stateRef.current.oy = oy;
+      base.style.left = ox + 'px';
+      base.style.top = oy + 'px';
+      base.classList.add('active');
+      knob.style.transform = 'translate(0,0)';
+      try { zone.setPointerCapture(id); } catch {}
+    };
+    const onZoneMove = (e) => {
+      if (stateRef.current.joyId !== e.pointerId) return;
+      const r = zone.getBoundingClientRect();
+      const dx = (e.clientX - r.left) - stateRef.current.ox;
+      const dy = (e.clientY - r.top) - stateRef.current.oy;
+      setKnob(dx, dy);
+    };
+    const onZoneUp = (e) => {
+      if (stateRef.current.joyId !== e.pointerId) return;
+      stateRef.current.joyId = null;
+      base.classList.remove('active');
+      knob.style.transform = 'translate(0,0)';
+      gameRef.current?.input.setJoystick(0, 0);
+      try { zone.releasePointerCapture(e.pointerId); } catch {}
+    };
+
+    const onFireDown = (e) => {
+      e.preventDefault();
+      stateRef.current.fireId = e.pointerId;
+      fireBtn.classList.add('active');
+      gameRef.current?.input.setTouchFire(true);
+      try { fireBtn.setPointerCapture(e.pointerId); } catch {}
+    };
+    const onFireUp = (e) => {
+      if (stateRef.current.fireId !== e.pointerId) return;
+      stateRef.current.fireId = null;
+      fireBtn.classList.remove('active');
+      gameRef.current?.input.setTouchFire(false);
+      try { fireBtn.releasePointerCapture(e.pointerId); } catch {}
+    };
+
+    zone.addEventListener('pointerdown', onZoneDown);
+    zone.addEventListener('pointermove', onZoneMove);
+    zone.addEventListener('pointerup', onZoneUp);
+    zone.addEventListener('pointercancel', onZoneUp);
+    fireBtn.addEventListener('pointerdown', onFireDown);
+    fireBtn.addEventListener('pointerup', onFireUp);
+    fireBtn.addEventListener('pointercancel', onFireUp);
+
+    return () => {
+      zone.removeEventListener('pointerdown', onZoneDown);
+      zone.removeEventListener('pointermove', onZoneMove);
+      zone.removeEventListener('pointerup', onZoneUp);
+      zone.removeEventListener('pointercancel', onZoneUp);
+      fireBtn.removeEventListener('pointerdown', onFireDown);
+      fireBtn.removeEventListener('pointerup', onFireUp);
+      fireBtn.removeEventListener('pointercancel', onFireUp);
+    };
+  }, []);
+
+  return (
+    <div class="touch-controls">
+      <div class="touch-stick" ref={stickZoneRef}>
+        <div class="touch-stick-base" ref={baseRef}>
+          <div class="touch-stick-arrows" aria-hidden="true">
+            <span class="ts-arrow up">▲</span>
+            <span class="ts-arrow down">▼</span>
+            <span class="ts-arrow left">◀</span>
+            <span class="ts-arrow right">▶</span>
+          </div>
+          <div class="touch-stick-knob" ref={knobRef}></div>
+        </div>
+        <div class="touch-stick-hint">MOVE</div>
+      </div>
+      <button class="touch-fire" ref={fireBtnRef} aria-label="Fire">
+        <svg viewBox="0 0 64 64" width="56" height="56" aria-hidden="true">
+          <path d="M32 4c-2 8-7 12-12 16-6 5-10 11-10 20a22 22 0 0 0 44 0c0-7-3-12-7-17-2 3-5 4-7 3 2-9-2-17-8-22z"
+                fill="#ff5a3c" stroke="#ffd28a" stroke-width="2" stroke-linejoin="round" />
+          <path d="M32 22c-1 5-4 8-7 11-3 3-5 6-5 11a12 12 0 0 0 24 0c0-4-2-7-4-9-2 2-4 2-5 1 1-5-1-10-3-14z"
+                fill="#ffd166" />
+        </svg>
+        <span class="touch-fire-label">FIRE</span>
+      </button>
     </div>
   );
 }
