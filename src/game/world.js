@@ -637,6 +637,32 @@ export class World {
     }
   }
 
+  // ----- Live view for solo mode -----
+  // No deep-copy: returns references to the live entity arrays.
+  // Same shape as snapshot() so the renderer treats them identically.
+  // DO NOT mutate the returned object.
+  live() {
+    if (!this._liveView) {
+      this._liveView = { hill: this.hill };
+    }
+    const v = this._liveView;
+    v.tickN = this.tickN;
+    v.state = this.state;
+    v.cash = this.cash;
+    v.hill = this.hill;
+    v.waveNum = this.waveNum;
+    v.inWave = this.inWave;
+    v.remainingZombies = this.zombies.length + this.spawnQueue.length;
+    // players is a Map; build a transient array (small, <=4)
+    if (!v.players || v.players.length !== this.players.size) v.players = new Array(this.players.size);
+    let i = 0; for (const p of this.players.values()) v.players[i++] = p;
+    v.zombies = this.zombies;
+    v.bullets = this.bullets;
+    v.enemyBullets = this.enemyBullets;
+    v.pickups = this.pickups;
+    return v;
+  }
+
   // ----- Snapshot for network sync -----
   snapshot() {
     return {

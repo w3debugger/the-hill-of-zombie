@@ -36,7 +36,7 @@ export class GameClient {
     this.localPlayerId = me.id;
     this.renderer.setLocalPlayer(me.id);
     this.localWorld.startGame();
-    this.world = this.localWorld.snapshot();
+    this.world = this.localWorld.live();
     this._begin();
   }
 
@@ -95,7 +95,7 @@ export class GameClient {
     if (this.localWorld) {
       const events = this.localWorld.step(dt, { [this.localPlayerId]: inputState });
       this._handleEvents(events);
-      this.world = this.localWorld.snapshot();
+      this.world = this.localWorld.live();
       this._processStateTransitions();
     } else if (this.net) {
       this.net.send(C2S.INPUT, { input: inputState });
