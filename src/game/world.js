@@ -107,14 +107,20 @@ function refillMagsFromReserve(p) {
 
 function buildWaveComposition(n, playerCount = 1) {
   // Scale wave size with squad size so 10 players don't crush a wave built for 1.
-  // Sub-linear so a full squad isn't drowned: ~1 + 0.5·(P-1).
-  const scale = 1 + 0.5 * Math.max(0, playerCount - 1);
+  // Sub-linear so a full squad isn't drowned: ~1 + 0.5·(P-1) at full tilt.
+  // Early waves use a gentler per-player coefficient so a 10-player wave 1
+  // doesn't dump 22 walkers on a fresh lobby.
+  const extra = Math.max(0, playerCount - 1);
+  const earlyScale = 1 + 0.25 * extra;        // waves 1–2
+  const midScale   = 1 + 0.35 * extra;        // wave 3
+  const scale      = 1 + 0.5  * extra;        // wave 4+
   const list = [];
-  // Gentle ramp on waves 1–2 so players can learn the controls before the swarm.
-  const walkers  = n === 1 ? Math.floor(6 * scale)
-                 : n === 2 ? Math.floor(9 * scale)
+  // Gentle ramp on waves 1–3 so players can learn the controls before the swarm.
+  const walkers  = n === 1 ? Math.floor(4 * earlyScale)
+                 : n === 2 ? Math.floor(6 * earlyScale)
+                 : n === 3 ? Math.floor(9 * midScale)
                  : Math.min(140, Math.floor((6 + n * 2.2) * scale));
-  const runners  = n >= 3 ? Math.min(90,  Math.floor((2 + (n - 2) * 1.6) * scale)) : 0;
+  const runners  = n >= 4 ? Math.min(90,  Math.floor((2 + (n - 3) * 1.6) * scale)) : 0;
   const brutes   = n >= 5 ? Math.min(24,  Math.floor((1 + (n - 5) / 2) * scale)) : 0;
   const spitters = n >= 6 ? Math.min(50,  Math.floor((2 + (n - 6) * 1.2) * scale)) : 0;
   for (let i = 0; i < walkers; i++) list.push('walker');
@@ -443,7 +449,9 @@ export class World {
     if (this.spawnTimerMs > 0) return;
     if (this.spawnQueue.length === 0) return;
     // Slower drip on the first couple of waves; tightens up as players gear up.
-    const baseDelay = clamp(1100 - this.waveNum * 45, 250, 1100);
+    const baseDelay = this.waveNum === 1 ? 1600
+                    : this.waveNum === 2 ? 1350
+                    : clamp(1100 - this.waveNum * 45, 250, 1100);
     this.spawnTimerMs = rand(baseDelay * 0.7, baseDelay * 1.3);
     const type = this.spawnQueue.shift();
     this.spawnZombie(type);
@@ -638,7 +646,7 @@ export class World {
     const arr = this.bullets;
     // Hit-magnet: near-misses still count as hits. Bullet flies straight,
     // but its effective hit radius is z.r + MAGNET_R.
-    const MAGNET_R = 16;
+    const MAGNET_R = 30;
     const grid = this._zGrid;
     const buf = this._qBuf;
     const hasZombies = this.zombies.length > 0;
