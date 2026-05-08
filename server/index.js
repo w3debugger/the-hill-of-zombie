@@ -47,8 +47,11 @@ class Room {
     this.world = null;
     this.tickHandle = null;
     this.snapshotHandle = null;
-    this.tickRate = 30;
-    this.snapshotRate = 20;
+    // 60Hz tick = ~16ms input-sample latency (was 33ms at 30Hz).
+    // 30Hz snapshot = ~33ms snapshot interval, fits cleanly under the
+    // client's 100ms interp delay with a 3-snapshot jitter buffer.
+    this.tickRate = 60;
+    this.snapshotRate = 30;
     this.lobbyReady = new Map();
     this.lastTick = 0;
   }

@@ -300,7 +300,8 @@ export class GameClient {
   // for the next round-trip. Snaps to authoritative position when error grows.
   _updateLocalPrediction(dt, inputState) {
     if (!this.localPlayerId || this.snapBuf.length === 0) return;
-    const latest = this.snapBuf[this.snapBuf.length - 1].snap;
+    const latestEntry = this.snapBuf[this.snapBuf.length - 1];
+    const latest = latestEntry.snap;
     const serverMe = latest.players.find(p => p.id === this.localPlayerId);
     if (!serverMe) { this.localPredict = null; return; }
     if (serverMe.dead) {
@@ -311,25 +312,39 @@ export class GameClient {
       this.localPredict = { x: serverMe.x, y: serverMe.y, vx: serverMe.vx, vy: serverMe.vy, angle: serverMe.angle };
     }
 
-    // Reconcile with authoritative position.
-    const errX = serverMe.x - this.localPredict.x;
-    const errY = serverMe.y - this.localPredict.y;
+    // Reconcile against the server's *projected current* position, not the
+    // raw snapshot. The latest snapshot describes where the server thought
+    // we were `snapAge` seconds ago — naively comparing predict against that
+    // stale value drags the predicted player backward every frame and makes
+    // movement feel sluggish. Project forward by snapAge using server velocity.
+    const snapAge = Math.min(0.5, Math.max(0, (performance.now() - latestEntry.ts) / 1000));
+    const sx = serverMe.x + (serverMe.vx || 0) * snapAge;
+    const sy = serverMe.y + (serverMe.vy || 0) * snapAge;
+    const errX = sx - this.localPredict.x;
+    const errY = sy - this.localPredict.y;
     const errMag = Math.hypot(errX, errY);
+    const ix0 = clamp(inputState.mx || 0, -1, 1);
+    const iy0 = clamp(inputState.my || 0, -1, 1);
+    const inputMagPre = Math.hypot(ix0, iy0);
     if (errMag > 120) {
+      // Hard snap on big drift (teleport / packet loss / dodge land).
       this.localPredict.x = serverMe.x;
       this.localPredict.y = serverMe.y;
       this.localPredict.vx = serverMe.vx;
       this.localPredict.vy = serverMe.vy;
     } else if (errMag > 0.5) {
-      const k = Math.min(1, 8 * dt);
+      // Softer pull while actively moving — avoids fighting the player's input.
+      // Faster pull when idle so we settle to authoritative position.
+      const kRate = inputMagPre > 0 ? 2 : 8;
+      const k = Math.min(1, kRate * dt);
       this.localPredict.x += errX * k;
       this.localPredict.y += errY * k;
     }
 
     // Apply input locally (matches World.updatePlayers movement curve).
-    const ix = clamp(inputState.mx || 0, -1, 1);
-    const iy = clamp(inputState.my || 0, -1, 1);
-    const inputMag = Math.hypot(ix, iy);
+    const ix = ix0;
+    const iy = iy0;
+    const inputMag = inputMagPre;
     const baseSpeed = 230 * Math.pow(1.15, serverMe.upgrades?.speed || 0);
     const sprinting = !!inputState.sprint && (serverMe.stamina || 0) > 0 && inputMag > 0;
     const speed = baseSpeed * (sprinting ? 1.45 : 1);
