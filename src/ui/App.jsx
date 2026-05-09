@@ -7,8 +7,17 @@ import { HUD, Shop, Pause, RadioStack, WaveBanner, HitVignette, TouchControls } 
 import { IS_TOUCH } from '../game/input.js';
 import { PLAYER_COLORS } from '../game/data.js';
 
+function defaultWsUrl() {
+  if (typeof window === 'undefined') return 'ws://localhost:3001';
+  // Match the page's protocol so an https-served client doesn't fail mixed-content
+  // checks. The dev server defaults to plain http, but tunnels (ngrok, devtunnels)
+  // and any deployed build will land on https.
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.hostname || 'localhost';
+  return `${proto}//${host}:3001`;
+}
 const WS_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL)
-  || (typeof window !== 'undefined' ? `ws://${window.location.hostname}:3001` : 'ws://localhost:3001');
+  || defaultWsUrl();
 
 const DEFAULT_NAMES = [
   'Khalid', 'Hamza', 'Tariq', 'Bilal', 'Yusuf', 'Umar', 'Salahuddin',
@@ -82,7 +91,7 @@ export function App() {
     setConnecting('Connecting…');
     const net = new NetClient(WS_URL);
     try { await net.connect(); }
-    catch (e) { setConnecting(null); setError('Could not reach server. Is it running on port 3001?'); return; }
+    catch (e) { setConnecting(null); setError(`Could not reach ${WS_URL}. Is the multiplayer server running on port 3001?`); return; }
     netRef.current = net;
     let myId = null;
     net.on(S2C.WELCOME, (m) => { myId = m.id; });
@@ -110,7 +119,7 @@ export function App() {
     setConnecting('Connecting…');
     const net = new NetClient(WS_URL);
     try { await net.connect(); }
-    catch (e) { setConnecting(null); setError('Could not reach server.'); return; }
+    catch (e) { setConnecting(null); setError(`Could not reach ${WS_URL}.`); return; }
     netRef.current = net;
     let myId = null;
     net.on(S2C.WELCOME, (m) => { myId = m.id; });

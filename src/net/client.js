@@ -20,7 +20,13 @@ export class NetClient {
         resolve();
       });
       this.ws.addEventListener('error', (e) => {
-        if (!this.connected) reject(new Error('WebSocket connection failed'));
+        if (!this.connected) {
+          // The browser swallows the underlying close code/reason on failed
+          // handshakes — log the attempted URL so devs at least know which
+          // host:port to verify in their server logs / firewall.
+          console.warn('[net] WebSocket connection failed:', this.url);
+          reject(new Error('WebSocket connection failed'));
+        }
       });
       this.ws.addEventListener('close', () => {
         this.connected = false;
