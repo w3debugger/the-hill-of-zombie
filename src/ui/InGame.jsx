@@ -171,10 +171,15 @@ export function RadioStack({ messages }) {
 
 // ---------- SHOP ----------
 export function Shop({ gameRef }) {
-  const [, force] = useState(0);
   const cashRef = useRef(null);
   const itemsRef = useRef(null);
   const [readyHeld, setReadyHeld] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  // Mirror selectedId into a ref so the rAF tick can read/clear it without
+  // re-subscribing each render.
+  const selectedRef = useRef(null);
+  selectedRef.current = selectedId;
+  const setSelected = (id) => { selectedRef.current = id; setSelectedId(id); };
 
   useEffect(() => {
     let raf;
@@ -183,9 +188,10 @@ export function Shop({ gameRef }) {
       if (game && game.world) {
         const w = game.world;
         if (cashRef.current) cashRef.current.textContent = '$' + w.cash;
-        // Update item enabled / owned states
+        // Update item enabled / owned / selected states
         if (itemsRef.current) {
           const me = w.players.find(p => p.id === game.localPlayerId);
+          let selectedStillValid = false;
           for (const node of itemsRef.current.children) {
             const id = node.dataset.id;
             const item = SHOP_ITEMS.find(it => it.id === id);
@@ -194,8 +200,12 @@ export function Shop({ gameRef }) {
             const price = shopPrice(item, ownedLevel);
             const owned = (item.type === 'weapon' && me.owned[item.key])
               || (item.type === 'upgrade' && me.upgrades[item.key] >= item.max);
+            const disabled = !owned && w.cash < price;
             node.classList.toggle('owned', !!owned);
-            node.classList.toggle('disabled', !owned && w.cash < price);
+            node.classList.toggle('disabled', disabled);
+            const isSelected = selectedRef.current === id && !owned && !disabled;
+            node.classList.toggle('selected', isSelected);
+            if (isSelected) selectedStillValid = true;
             const priceEl = node.querySelector('.price');
             if (priceEl) {
               priceEl.textContent = owned
@@ -205,6 +215,8 @@ export function Shop({ gameRef }) {
                     : '$' + price);
             }
           }
+          // Selected item became owned or unaffordable — clear it.
+          if (selectedRef.current && !selectedStillValid) setSelected(null);
         }
       }
       raf = requestAnimationFrame(tick);
@@ -213,7 +225,19 @@ export function Shop({ gameRef }) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const buy = (id) => gameRef.current?.buy(id);
+  const handleItemClick = (e, item) => {
+    // Ignore clicks on owned or unaffordable items (their classes are managed
+    // by the rAF tick on the DOM node, not in props).
+    const node = e.currentTarget;
+    if (node.classList.contains('owned') || node.classList.contains('disabled')) return;
+    setSelected(selectedRef.current === item.id ? null : item.id);
+  };
+  const confirmBuy = () => {
+    const id = selectedRef.current;
+    if (!id) return;
+    gameRef.current?.buy(id);
+    setSelected(null);
+  };
   const toggleReady = () => {
     const next = !readyHeld;
     setReadyHeld(next);
@@ -222,6 +246,8 @@ export function Shop({ gameRef }) {
 
   // Reset ready on unmount
   useEffect(() => () => gameRef.current?.setReady(false), []);
+
+  const selectedItem = selectedId ? SHOP_ITEMS.find(it => it.id === selectedId) : null;
 
   return (
     <div class="overlay shop-overlay">
@@ -236,7 +262,7 @@ export function Shop({ gameRef }) {
               class="shop-item"
               key={item.id}
               data-id={item.id}
-              onClick={() => buy(item.id)}
+              onClick={(e) => handleItemClick(e, item)}
             >
               <div class="name">{item.name}</div>
               <div class="desc">{item.desc}</div>
@@ -245,7 +271,13 @@ export function Shop({ gameRef }) {
           ))}
         </div>
         <div class="shop-foot">
-          <div class="hint">tip: pickups still magnetize toward you in the shop</div>
+          <button
+            class="btn"
+            disabled={!selectedItem}
+            onClick={confirmBuy}
+          >
+            {selectedItem ? `BUY ${selectedItem.name}` : 'SELECT AN ITEM'}
+          </button>
           <button class={`btn ${readyHeld ? 'primary' : ''}`} onClick={toggleReady}>
             {readyHeld ? 'READY ✓' : 'NEXT WAVE'}
           </button>

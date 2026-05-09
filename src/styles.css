@@ -132,8 +132,8 @@ button { font-family: inherit; }
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.24); }
-.btn:active { transform: translateY(1px); }
+.btn:hover:not(:disabled) { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.24); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn.primary {
   background: var(--accent);
@@ -995,6 +995,12 @@ button { font-family: inherit; }
 }
 .shop-item.disabled { opacity: 0.4; cursor: not-allowed; }
 .shop-item.owned { border-color: var(--green); }
+.shop-item.selected {
+  border-color: var(--accent);
+  background: rgba(255, 59, 59, 0.14);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+  transform: translateY(-1px);
+}
 .shop-item .name {
   font-weight: 700;
   font-size: 15px;
