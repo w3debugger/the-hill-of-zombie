@@ -301,15 +301,15 @@ export function Pause({ onResume, onQuit }) {
 }
 
 // ---------- TOUCH CONTROLS ----------
-// Left side: floating thumbstick (the stick origin follows the first finger
-// that lands in the joystick zone). Right side: fire button. Both use
-// PointerEvents so a single finger on each side works simultaneously.
+// Left side: fixed thumbstick pinned to the bottom-left (its CSS position).
+// Right side: fire button. Both use PointerEvents so a single finger on each
+// side works simultaneously.
 export function TouchControls({ gameRef }) {
   const stickZoneRef = useRef(null);
   const knobRef = useRef(null);
   const baseRef = useRef(null);
   const fireBtnRef = useRef(null);
-  const stateRef = useRef({ joyId: null, ox: 0, oy: 0, fireId: null });
+  const stateRef = useRef({ joyId: null, cx: 0, cy: 0, fireId: null });
 
   useEffect(() => {
     const zone = stickZoneRef.current;
@@ -334,22 +334,19 @@ export function TouchControls({ gameRef }) {
       e.preventDefault();
       const id = e.pointerId;
       stateRef.current.joyId = id;
-      const r = zone.getBoundingClientRect();
-      const ox = e.clientX - r.left;
-      const oy = e.clientY - r.top;
-      stateRef.current.ox = ox;
-      stateRef.current.oy = oy;
-      base.style.left = ox + 'px';
-      base.style.top = oy + 'px';
+      const br = base.getBoundingClientRect();
+      const cx = br.left + br.width / 2;
+      const cy = br.top + br.height / 2;
+      stateRef.current.cx = cx;
+      stateRef.current.cy = cy;
       base.classList.add('active');
-      knob.style.transform = 'translate(0,0)';
+      setKnob(e.clientX - cx, e.clientY - cy);
       try { zone.setPointerCapture(id); } catch {}
     };
     const onZoneMove = (e) => {
       if (stateRef.current.joyId !== e.pointerId) return;
-      const r = zone.getBoundingClientRect();
-      const dx = (e.clientX - r.left) - stateRef.current.ox;
-      const dy = (e.clientY - r.top) - stateRef.current.oy;
+      const dx = e.clientX - stateRef.current.cx;
+      const dy = e.clientY - stateRef.current.cy;
       setKnob(dx, dy);
     };
     const onZoneUp = (e) => {
