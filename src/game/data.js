@@ -19,7 +19,7 @@ export const WEAPON_ORDER = ['pistol', 'shotgun', 'smg', 'rifle'];
 export const ZTYPES = {
   walker:  { hp:80,  speed:55,  dmg:9,  r:15, atkCd:600,  cash:5,  scoreMul:1,   push:0.6 },
   runner:  { hp:55,  speed:135, dmg:6,  r:13, atkCd:450,  cash:8,  scoreMul:1.5, push:0.5 },
-  brute:   { hp:380, speed:36,  dmg:28, r:26, atkCd:900,  cash:50, scoreMul:6,   push:0.2, knockback:80 },
+  brute:   { hp:380, speed:36,  dmg:28, r:26, atkCd:900,  cash:120, scoreMul:6,   push:0.2, knockback:80 },
   spitter: { hp:65,  speed:78,  dmg:14, r:14, atkCd:1500, cash:14, scoreMul:2,   push:0.5, ranged:true, rangedSpeed:380, rangedRange:520 },
 };
 
