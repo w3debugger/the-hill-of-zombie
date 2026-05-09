@@ -632,6 +632,162 @@ button { font-family: inherit; }
   96% { opacity: 0.7; }
 }
 
+/* ---- INTERACTIVE INTRO (start gate, chapters, jump scare, ENTER) ---- */
+.intro-start {
+  position: absolute; inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 38px;
+  z-index: 4;
+}
+.intro-start-title {
+  font-family: var(--font-typewriter);
+  font-size: 30px;
+  letter-spacing: 0.55em;
+  color: var(--accent);
+  text-shadow: 0 0 18px rgba(255, 59, 59, 0.55), 0 0 4px rgba(255, 59, 59, 0.7);
+  animation: titleCardFlicker 4.1s steps(1) infinite;
+  text-align: center;
+}
+.intro-start-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: rgba(20, 6, 6, 0.7);
+  border: 1px solid rgba(255, 59, 59, 0.55);
+  color: var(--accent);
+  padding: 22px 48px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  box-shadow: 0 0 30px rgba(255, 59, 59, 0.18), inset 0 0 18px rgba(255, 59, 59, 0.08);
+  animation: introStartPulse 1.6s ease-in-out infinite;
+}
+.intro-start-btn:hover {
+  background: rgba(40, 10, 10, 0.85);
+  border-color: var(--accent);
+}
+.intro-start-btn-line {
+  font-size: 18px;
+  letter-spacing: 0.45em;
+  text-shadow: 0 0 12px rgba(255, 59, 59, 0.7);
+}
+.intro-start-btn-sub {
+  font-size: 11px;
+  letter-spacing: 0.35em;
+  color: var(--ink-dim);
+}
+@keyframes introStartPulse {
+  0%, 100% { box-shadow: 0 0 30px rgba(255, 59, 59, 0.18), inset 0 0 18px rgba(255, 59, 59, 0.08); }
+  50% { box-shadow: 0 0 50px rgba(255, 59, 59, 0.34), inset 0 0 28px rgba(255, 59, 59, 0.16); }
+}
+
+.intro-chapter-wrap {
+  position: absolute; inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  padding: 0 24px;
+}
+.intro-chapter {
+  width: min(740px, 92vw);
+  text-align: center;
+  animation: introChapterIn 0.7s ease forwards;
+}
+.intro-chapter .intro-h { margin-top: 0; }
+@keyframes introChapterIn {
+  from { opacity: 0; transform: translateY(14px); filter: blur(6px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+.intro-progress {
+  display: flex;
+  gap: 10px;
+  margin-top: 48px;
+}
+.intro-pip {
+  width: 22px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 0.25s, box-shadow 0.25s;
+}
+.intro-pip.past { background: rgba(255, 59, 59, 0.35); }
+.intro-pip.on {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.intro-hint {
+  margin-top: 22px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.4em;
+  color: var(--ink-dim);
+  animation: blink 1.6s steps(2) infinite;
+}
+.intro-hint.dim { animation: none; opacity: 0.6; }
+
+/* Jump scare: bright red flash + camera shake on chapter 2. */
+.intro-scare-flash {
+  position: absolute; inset: 0;
+  background: rgba(220, 30, 30, 0.55);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 6;
+  animation: introScareFlash 0.9s ease-out forwards;
+}
+@keyframes introScareFlash {
+  0%   { opacity: 0; }
+  4%   { opacity: 1; }
+  18%  { opacity: 0.2; }
+  30%  { opacity: 0.7; }
+  100% { opacity: 0; }
+}
+.intro.shake { animation: filmFlicker 5.7s steps(1) infinite, introShake 0.55s ease-out; }
+@keyframes introShake {
+  0%   { transform: translate(0, 0); }
+  15%  { transform: translate(-8px, 6px); }
+  30%  { transform: translate(7px, -5px); }
+  45%  { transform: translate(-5px, 4px); }
+  60%  { transform: translate(4px, -3px); }
+  80%  { transform: translate(-2px, 1px); }
+  100% { transform: translate(0, 0); }
+}
+
+/* Final ENTER phase. */
+.intro-enter-wrap {
+  position: absolute; inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  z-index: 3;
+}
+.intro-enter-h {
+  margin: 0;
+  animation: titleCardFlicker 4.1s steps(1) infinite;
+}
+.intro-enter-btn {
+  background: linear-gradient(180deg, rgba(80, 12, 12, 0.85), rgba(30, 4, 4, 0.85));
+  border: 1px solid var(--accent);
+  color: #ffeaea;
+  padding: 18px 56px;
+  font-family: var(--font-typewriter);
+  font-size: 18px;
+  letter-spacing: 0.45em;
+  cursor: pointer;
+  box-shadow: 0 0 26px rgba(255, 59, 59, 0.35), inset 0 0 14px rgba(0, 0, 0, 0.6);
+  animation: introStartPulse 1.4s ease-in-out infinite;
+}
+.intro-enter-btn:hover {
+  background: linear-gradient(180deg, rgba(120, 18, 18, 0.9), rgba(60, 8, 8, 0.9));
+}
+
 /* =========================================
    HUD
    ========================================= */

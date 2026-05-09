@@ -306,6 +306,38 @@ const SFX = {
     bus._tone({ freq: 70, freqEnd: 40, dur: 0.10, type: 'sine', vol: 0.32, out });
     setTimeout(() => bus._tone({ freq: 60, freqEnd: 35, dur: 0.13, type: 'sine', vol: 0.24, out }), 130);
   },
+  // Blood-curdling shriek — high banshee tone collapsing into a guttural growl.
+  // Used for intro jump scare beats.
+  scream: bus => {
+    const out = bus._outNodes(0.6);
+    bus._tone({ freq: 1850, freqEnd: 320, dur: 0.55, type: 'sawtooth', vol: 0.22, out });
+    bus._tone({ freq: 940, freqEnd: 180, dur: 0.65, type: 'square', vol: 0.16, out });
+    bus._noise({ dur: 0.7, vol: 0.30, lp: 4500, hp: 400, band: [1600, 2.0], out });
+    bus._growl({ base: 110, dur: 0.7, vol: 0.20, vibratoHz: 9, vibratoDepth: 18, grit: 0.20, lp: 720, out });
+  },
+  // Disembodied whisper — narrowband noise with a slow upward sweep, like
+  // breath spoken right behind your ear.
+  whisper: bus => {
+    const out = bus._outNodes(0.65);
+    bus._noise({ dur: 1.4, vol: 0.20, lp: 2200, hp: 350, band: [950, 4.5], out });
+    bus._noise({ dur: 1.6, vol: 0.10, lp: 600, hp: 80, out });
+    bus._tone({ freq: 60, freqEnd: 38, dur: 1.4, type: 'sine', vol: 0.10, out });
+  },
+  // Worn-tape hiss with a couple of crackle clicks. Plays when "tape" rolls.
+  tape: bus => {
+    const out = bus._outNodes(0.18);
+    bus._noise({ dur: 1.2, vol: 0.10, lp: 8000, hp: 1200, out });
+    bus._noise({ dur: 0.04, vol: 0.20, lp: 7000, hp: 2000, out });
+    setTimeout(() => bus._noise({ dur: 0.04, vol: 0.16, lp: 7000, hp: 2200, out }), 230);
+    setTimeout(() => bus._noise({ dur: 0.05, vol: 0.14, lp: 6500, hp: 1800, out }), 540);
+  },
+  // Long descending dread drone — chapter transition cue.
+  drone: bus => {
+    const out = bus._outNodes(0.55);
+    bus._tone({ freq: 90, freqEnd: 42, dur: 1.6, type: 'sine', vol: 0.26, out });
+    bus._tone({ freq: 132, freqEnd: 70, dur: 1.4, type: 'sawtooth', vol: 0.10, out });
+    bus._noise({ dur: 1.7, vol: 0.10, lp: 700, hp: 60, out });
+  },
 };
 
 AudioBus.prototype.play = function (name) {

@@ -1,22 +1,182 @@
-import { useState, useEffect, useRef } from 'preact/hooks';
+import { useState, useEffect, useRef, useMemo } from 'preact/hooks';
 import { INTRO_TEXT, PLAYER_COLORS } from '../game/data.js';
+import { AudioBus } from '../game/audio.js';
 
 // ---------- INTRO ----------
+//
+// Interactive horror cold-open. The user clicks (or presses Space/Enter) to
+// unlock audio and advance chapter-by-chapter. Each click triggers a paired
+// horror cue: tape hiss, whispers, distant moans, a jump-scare scream at the
+// "none of them are breathing" beat, then a heartbeat that stays through the
+// closing chapters. Final phase is an ENTER THE TOWER button.
+//
+// Audio note: browsers refuse Web Audio until a user gesture, so the very
+// first phase is a "click to begin" gate. We build a local AudioBus there
+// and tear it down (and stop ambience) on dismiss.
 export function Intro({ onDone }) {
-  const [skipping, setSkipping] = useState(false);
-  const [phase, setPhase] = useState('coldOpen'); // 'coldOpen' | 'crawl'
+  const [phase, setPhase] = useState('start'); // 'start' | 'coldOpen' | 'chapter' | 'enter' | 'fading'
+  const [chapter, setChapter] = useState(0);
+  const [scare, setScare] = useState(0);   // bumped to retrigger flash/shake animations
+  const audioRef = useRef(null);
+  const advanceLockRef = useRef(false);
+  const coldOpenTimerRef = useRef(null);
+
+  // Group INTRO_TEXT into chapters by splitting on `space` separators.
+  const chapters = useMemo(() => {
+    const groups = [];
+    let cur = [];
+    for (const line of INTRO_TEXT) {
+      if (line.kind === 'space') {
+        if (cur.length) groups.push(cur);
+        cur = [];
+      } else {
+        cur.push(line);
+      }
+    }
+    if (cur.length) groups.push(cur);
+    return groups;
+  }, []);
+
+  // Per-chapter horror cue. Index aligns with `chapters`. Chapter 2
+  // (HILLTOP ECHO — "none of them are breathing") is the jump scare.
+  const chapterCue = (idx) => {
+    const a = audioRef.current;
+    if (!a) return;
+    switch (idx) {
+      case 0: a.play('whisper'); break;
+      case 1: a.play('groan'); setTimeout(() => a.play('whisper'), 600); break;
+      case 2:
+        a.play('scream');
+        setTimeout(() => a.play('thunder'), 180);
+        setScare(s => s + 1);
+        break;
+      case 3:
+        a.play('drone');
+        a.setHeartbeatIntensity(0.45);
+        break;
+      case 4:
+        a.play('whisper');
+        a.setHeartbeatIntensity(0.7);
+        break;
+      case 5:
+        a.play('brute');
+        a.setHeartbeatIntensity(0.95);
+        break;
+      default: a.play('whisper');
+    }
+  };
+
+  const begin = () => {
+    if (audioRef.current) return;
+    const bus = new AudioBus();
+    bus.ensure();
+    audioRef.current = bus;
+    bus.play('tape');
+    setTimeout(() => bus.play('thunder'), 700);
+    bus.startAmbience();
+    setPhase('coldOpen');
+    coldOpenTimerRef.current = setTimeout(() => {
+      coldOpenTimerRef.current = null;
+      setPhase('chapter');
+      chapterCue(0);
+    }, 3400);
+  };
+
+  const advance = () => {
+    if (advanceLockRef.current) return;
+    if (phase === 'start') { begin(); return; }
+    if (phase === 'fading') return;
+    if (phase === 'coldOpen') {
+      if (coldOpenTimerRef.current) {
+        clearTimeout(coldOpenTimerRef.current);
+        coldOpenTimerRef.current = null;
+      }
+      setPhase('chapter');
+      chapterCue(0);
+      return;
+    }
+    if (phase === 'chapter') {
+      const next = chapter + 1;
+      if (next >= chapters.length) {
+        audioRef.current?.play('drone');
+        setPhase('enter');
+        return;
+      }
+      // Brief lock so a held key doesn't flash through chapters.
+      advanceLockRef.current = true;
+      setTimeout(() => { advanceLockRef.current = false; }, 280);
+      setChapter(next);
+      chapterCue(next);
+      return;
+    }
+    if (phase === 'enter') {
+      finish();
+    }
+  };
+
+  const finish = () => {
+    if (phase === 'fading') return;
+    if (coldOpenTimerRef.current) {
+      clearTimeout(coldOpenTimerRef.current);
+      coldOpenTimerRef.current = null;
+    }
+    setPhase('fading');
+    const a = audioRef.current;
+    if (a) {
+      try { a.stopAmbience(); } catch (e) {}
+    }
+    setTimeout(onDone, 320);
+  };
+
   useEffect(() => {
-    const onKey = (e) => { if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') onDone(); };
+    const onKey = (e) => {
+      if (e.code === 'Escape') { finish(); return; }
+      if (e.code === 'Space' || e.code === 'Enter') {
+        e.preventDefault();
+        advance();
+      }
+    };
     window.addEventListener('keydown', onKey);
-    const t = setTimeout(() => setPhase('crawl'), 3400);
-    return () => { window.removeEventListener('keydown', onKey); clearTimeout(t); };
-  }, [onDone]);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  // Cleanup if unmounted mid-intro (e.g. dev hot reload).
+  useEffect(() => () => {
+    if (coldOpenTimerRef.current) clearTimeout(coldOpenTimerRef.current);
+    const a = audioRef.current;
+    if (a) { try { a.stopAmbience(); } catch (e) {} }
+  }, []);
+
+  const handleClick = (e) => {
+    // Skip button has its own handler — don't double-fire.
+    if (e.target.closest('.intro-skip')) return;
+    advance();
+  };
+
+  const isJumpScare = phase === 'chapter' && chapter === 2;
+  const rootClass = [
+    'intro',
+    phase === 'fading' ? 'fading' : '',
+    isJumpScare ? 'shake' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div class={`intro ${skipping ? 'fading' : ''}`}>
+    <div class={rootClass} onClick={handleClick}>
       <div class="intro-bg" />
       <div class="intro-scan" />
       <div class="intro-flicker" />
       <div class="intro-vignette" />
+      {scare > 0 && <div key={scare} class="intro-scare-flash" />}
+
+      {phase === 'start' && (
+        <div class="intro-start">
+          <div class="intro-start-title">THE HILL OF ZOMBIE</div>
+          <button class="intro-start-btn" onClick={(e) => { e.stopPropagation(); advance(); }}>
+            <span class="intro-start-btn-line">▶ CLICK TO BEGIN</span>
+            <span class="intro-start-btn-sub">headphones recommended</span>
+          </button>
+        </div>
+      )}
 
       {phase === 'coldOpen' && (
         <div class="intro-coldopen">
@@ -26,23 +186,36 @@ export function Intro({ onDone }) {
         </div>
       )}
 
-      {phase === 'crawl' && (
-        <div class="intro-scroll">
+      {phase === 'chapter' && (
+        <div class="intro-chapter-wrap">
           <div class="intro-marker" />
-          {INTRO_TEXT.map((line, i) => (
-            line.kind === 'header'
-              ? <h1 class="intro-h">{line.text}</h1>
-              : line.kind === 'space'
-              ? <div class="intro-space" />
-              : <p class="intro-p">{line.text}</p>
-          ))}
-          <div class="intro-end">
-            <p class="intro-tag">— PRESS ANY KEY —</p>
+          <div key={chapter} class="intro-chapter">
+            {chapters[chapter].map((line) => (
+              line.kind === 'header'
+                ? <h1 class="intro-h">{line.text}</h1>
+                : <p class="intro-p">{line.text}</p>
+            ))}
           </div>
+          <div class="intro-progress">
+            {chapters.map((_, i) => (
+              <span class={`intro-pip ${i === chapter ? 'on' : ''} ${i < chapter ? 'past' : ''}`} />
+            ))}
+          </div>
+          <div class="intro-hint">— click anywhere · or press SPACE —</div>
         </div>
       )}
 
-      <button class="intro-skip" onClick={() => { setSkipping(true); setTimeout(onDone, 220); }}>SKIP</button>
+      {phase === 'enter' && (
+        <div class="intro-enter-wrap">
+          <div class="intro-h intro-enter-h">HOLD THE TOWER</div>
+          <button class="intro-enter-btn" onClick={(e) => { e.stopPropagation(); finish(); }}>
+            ENTER THE HILL
+          </button>
+          <div class="intro-hint dim">they are already on the slope</div>
+        </div>
+      )}
+
+      <button class="intro-skip" onClick={(e) => { e.stopPropagation(); finish(); }}>SKIP</button>
     </div>
   );
 }
