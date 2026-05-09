@@ -9,10 +9,10 @@ export const HILL_DRAIN_DPS = 10;
 export const PLAYER_COLORS = ['#5cc8ff', '#ff7d7d', '#9affb6', '#ffd96a'];
 
 export const WEAPONS = {
-  pistol:  { key:'pistol',  name:'PISTOL',  dmg:26, fireRate:260, spread:0.04, speed:14, range:620, magSize:Infinity, reloadMs:0,    ammoColor:'#ffd96a', tracerLen:18, shots:1, recoil:1.0, sound:'pistol', auto:false },
-  shotgun: { key:'shotgun', name:'SHOTGUN', dmg:17, fireRate:680, spread:0.22, speed:13, range:380, magSize:8,        reloadMs:1100, ammoColor:'#ff8c4a', tracerLen:14, shots:8, recoil:6.0, sound:'shotgun', auto:false },
-  smg:     { key:'smg',     name:'SMG',     dmg:13, fireRate:75,  spread:0.09, speed:16, range:520, magSize:45,       reloadMs:1300, ammoColor:'#5cc8ff', tracerLen:16, shots:1, recoil:0.5, sound:'smg', auto:true },
-  rifle:   { key:'rifle',   name:'RIFLE',   dmg:95, fireRate:580, spread:0.004, speed:26, range:1200, magSize:8,      reloadMs:1600, ammoColor:'#9affb6', tracerLen:36, shots:1, recoil:9.0, pierce:3, sound:'rifle', auto:false },
+  pistol:  { key:'pistol',  name:'PISTOL',  dmg:26, fireRate:260, spread:0.04, speed:14, range:930, magSize:Infinity, reloadMs:0,    ammoColor:'#ffd96a', tracerLen:18, shots:1, recoil:1.0, sound:'pistol', auto:false },
+  shotgun: { key:'shotgun', name:'SHOTGUN', dmg:17, fireRate:680, spread:0.22, speed:13, range:570, magSize:8,        reloadMs:1100, ammoColor:'#ff8c4a', tracerLen:14, shots:8, recoil:6.0, sound:'shotgun', auto:false },
+  smg:     { key:'smg',     name:'SMG',     dmg:13, fireRate:75,  spread:0.09, speed:16, range:780, magSize:45,       reloadMs:1300, ammoColor:'#5cc8ff', tracerLen:16, shots:1, recoil:0.5, sound:'smg', auto:true },
+  rifle:   { key:'rifle',   name:'RIFLE',   dmg:95, fireRate:580, spread:0.004, speed:26, range:1800, magSize:8,      reloadMs:1600, ammoColor:'#9affb6', tracerLen:36, shots:1, recoil:9.0, pierce:3, sound:'rifle', auto:false },
 };
 export const WEAPON_ORDER = ['pistol', 'shotgun', 'smg', 'rifle'];
 
