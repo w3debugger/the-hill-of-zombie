@@ -1,14 +1,18 @@
-// Authoritative multiplayer server.
-// Runs the World per room at 30Hz, broadcasts snapshots at 20Hz.
+// Signaling-only server for WebRTC peer-to-peer multiplayer.
+//
+// Owns 4-character room codes, lobby state, and forwards SDP/ICE candidates
+// between peers in the same room. Once peers have established their
+// DataChannels, gameplay traffic flows browser-to-browser and this server is
+// dormant — so a sleeping free-tier instance is fine: it only wakes for
+// signaling moments (room create, join, start, peer disconnect), never during
+// the actual match.
 
 import http from 'http';
 import os from 'os';
 import { WebSocketServer } from 'ws';
-import { World } from '../src/game/world.js';
-import { C2S, S2C } from '../src/net/protocol.js';
 
 const PORT = Number(process.env.PORT) || 3001;
-const log = (...args) => console.log('[hoz]', ...args);
+const log = (...args) => console.log('[hoz-sig]', ...args);
 
 function lanIPs() {
   const out = [];
@@ -29,122 +33,21 @@ const httpServer = http.createServer((req, res) => {
   res.writeHead(404);
   res.end();
 });
-// perMessageDeflate: false — our snapshots/inputs are tiny JSON; the ~5-15 ms
-// CPU cost of zlib per message dwarfs the bytes saved on a LAN.
 const wss = new WebSocketServer({ server: httpServer, perMessageDeflate: false });
+
 httpServer.listen(PORT, () => {
-  log(`HTTP+WS server listening on :${PORT}`);
+  log(`signaling on :${PORT}`);
   const ips = lanIPs();
-  if (ips.length) log(`LAN play: other players open http://${ips[0]}:5173 on the same WiFi`);
+  if (ips.length) log(`LAN: phones browse to http://${ips[0]}:5173 on the same WiFi`);
 });
 
 const rooms = new Map();   // code -> Room
-const clients = new Map(); // ws -> Client
+const peers = new Map();   // ws   -> Peer
 
-class Client {
-  constructor(ws) {
-    this.ws = ws;
-    this.id = nanoid();
-    this.name = 'Soldier';
-    this.color = '#5cc8ff';
-    this.room = null;
-    this.input = {};
-  }
-  send(t, payload = {}) {
-    if (this.ws.readyState !== this.ws.OPEN) return;
-    try { this.ws.send(JSON.stringify({ t, ...payload })); } catch (e) {}
-  }
+function send(ws, t, payload = {}) {
+  if (ws.readyState !== ws.OPEN) return;
+  try { ws.send(JSON.stringify({ t, ...payload })); } catch (e) {}
 }
-
-class Room {
-  constructor(code) {
-    this.code = code;
-    this.clients = [];
-    this.host = null;
-    this.world = null;
-    this.tickHandle = null;
-    this.snapshotHandle = null;
-    // 60Hz tick = ~16ms input-sample latency.
-    // 60Hz snapshot — bandwidth is a non-issue on LAN; matching tick rate
-    // halves time-between-authoritative-corrections so remote players move
-    // smoothly without a long interp delay.
-    this.tickRate = 60;
-    this.snapshotRate = 60;
-    this.lobbyReady = new Map();
-    this.lastTick = 0;
-  }
-  addClient(c) {
-    if (this.clients.length === 0) this.host = c.id;
-    this.clients.push(c);
-    c.room = this;
-    this.broadcastLobby();
-  }
-  removeClient(c) {
-    this.clients = this.clients.filter(x => x !== c);
-    c.room = null;
-    this.lobbyReady.delete(c.id);
-    if (this.host === c.id) this.host = this.clients[0]?.id || null;
-    if (this.world) this.world.removePlayer(c.id);
-    if (this.clients.length === 0) {
-      this.shutdown();
-      rooms.delete(this.code);
-      log(`room ${this.code} closed`);
-    } else {
-      this.broadcastLobby();
-    }
-  }
-  broadcastLobby() {
-    const players = this.clients.map(c => ({
-      id: c.id, name: c.name, color: c.color, ready: !!this.lobbyReady.get(c.id),
-    }));
-    for (const c of this.clients) {
-      c.send(S2C.LOBBY, { code: this.code, players, host: this.host });
-    }
-  }
-  start() {
-    if (this.world) return;
-    this.world = new World();
-    for (const c of this.clients) {
-      this.world.addPlayer(c.id, c.name, c.color);
-    }
-    this.world.startGame();
-    for (const c of this.clients) c.send(S2C.GAME_START, { yourId: c.id });
-    log(`room ${this.code} started with ${this.clients.length} player(s)`);
-
-    this.lastTick = Date.now();
-    this.tickHandle = setInterval(() => this.tick(), 1000 / this.tickRate);
-    this.snapshotHandle = setInterval(() => this.broadcastSnapshot(), 1000 / this.snapshotRate);
-  }
-  tick() {
-    if (!this.world) return;
-    const now = Date.now();
-    const dt = Math.min(0.1, (now - this.lastTick) / 1000);
-    this.lastTick = now;
-    const inputs = {};
-    for (const c of this.clients) inputs[c.id] = c.input || {};
-    const events = this.world.step(dt, inputs);
-    if (events && events.length) {
-      const msg = JSON.stringify({ t: S2C.EVENTS, events });
-      for (const c of this.clients) {
-        if (c.ws.readyState === c.ws.OPEN) c.ws.send(msg);
-      }
-    }
-  }
-  broadcastSnapshot() {
-    if (!this.world) return;
-    const snap = this.world.snapshot();
-    const msg = JSON.stringify({ t: S2C.SNAPSHOT, ...snap });
-    for (const c of this.clients) {
-      if (c.ws.readyState === c.ws.OPEN) c.ws.send(msg);
-    }
-  }
-  shutdown() {
-    if (this.tickHandle) clearInterval(this.tickHandle);
-    if (this.snapshotHandle) clearInterval(this.snapshotHandle);
-    this.world = null;
-  }
-}
-
 function genCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   for (let attempt = 0; attempt < 60; attempt++) {
@@ -152,92 +55,157 @@ function genCode() {
     for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
     if (!rooms.has(s)) return s;
   }
-  throw new Error('Could not generate unique code');
+  throw new Error('out of codes');
 }
-function nanoid(len = 10) {
+function pid() {
   let s = '';
-  for (let i = 0; i < len; i++) s += Math.floor(Math.random() * 36).toString(36);
+  for (let i = 0; i < 10; i++) s += Math.floor(Math.random() * 36).toString(36);
   return s;
 }
 
+function broadcastLobby(room) {
+  const players = [...room.peers.values()].map(p => ({
+    id: p.id, name: p.name, color: p.color, ready: !!p.ready,
+  }));
+  for (const p of room.peers.values()) {
+    send(p.ws, 'lobby', { code: room.code, players, host: room.hostId });
+  }
+}
+
 wss.on('connection', (ws, req) => {
-  // Disable Nagle on the underlying TCP socket. Default Nagle batches small
-  // writes for up to ~40 ms waiting for an ack — that's an extra 40 ms of
-  // input lag on every keystroke for zero benefit on a LAN where bandwidth
-  // isn't the bottleneck. We want each input/snapshot on the wire NOW.
+  // Disable Nagle on the underlying TCP socket — we send infrequent, small
+  // signaling messages and don't want them batched into a 40 ms wait.
   try { req.socket.setNoDelay(true); } catch (e) {}
-  const c = new Client(ws);
-  clients.set(ws, c);
-  log(`client ${c.id} connected (${req.socket.remoteAddress})`);
-  c.send(S2C.WELCOME, { id: c.id });
+  const peer = {
+    id: pid(),
+    ws,
+    name: 'Soldier',
+    color: '#5cc8ff',
+    room: null,
+    ready: false,
+  };
+  peers.set(ws, peer);
+  send(ws, 'welcome', { id: peer.id });
+  log(`peer ${peer.id} connected (${req.socket.remoteAddress})`);
+
   ws.on('message', (data) => {
     let msg;
-    try { msg = JSON.parse(data); } catch (e) { return; }
-    handleMessage(c, msg);
+    try { msg = JSON.parse(data); } catch (_) { return; }
+    handle(peer, msg);
   });
   ws.on('close', () => {
-    if (c.room) c.room.removeClient(c);
-    clients.delete(ws);
-    log(`client ${c.id} disconnected`);
+    if (peer.room) leaveRoom(peer);
+    peers.delete(ws);
+    log(`peer ${peer.id} disconnected`);
   });
   ws.on('error', () => {});
 });
 
-function handleMessage(c, msg) {
-  if (!msg || typeof msg.t !== 'string') return;
-  switch (msg.t) {
-    case C2S.HELLO: {
-      c.name = String(msg.name || 'Soldier').slice(0, 16) || 'Soldier';
-      c.color = String(msg.color || '#5cc8ff');
+function handle(p, m) {
+  if (!m || typeof m.t !== 'string') return;
+  switch (m.t) {
+    case 'hello': {
+      p.name = String(m.name || 'Soldier').slice(0, 16) || 'Soldier';
+      p.color = String(m.color || '#5cc8ff');
       break;
     }
-    case C2S.CREATE_ROOM: {
-      if (c.room) return c.send(S2C.ERROR, { msg: 'Already in a room' });
+    case 'createRoom': {
+      if (p.room) return send(p.ws, 'error', { msg: 'Already in a room' });
       let code;
-      try { code = genCode(); } catch (e) { return c.send(S2C.ERROR, { msg: 'Server full' }); }
-      const r = new Room(code);
-      rooms.set(code, r);
-      r.addClient(c);
-      log(`room ${code} created by ${c.name}`);
+      try { code = genCode(); } catch (_) { return send(p.ws, 'error', { msg: 'Server full' }); }
+      const room = { code, hostId: p.id, peers: new Map(), started: false };
+      rooms.set(code, room);
+      room.peers.set(p.id, p);
+      p.room = room;
+      log(`${p.name} created room ${code}`);
+      broadcastLobby(room);
       break;
     }
-    case C2S.JOIN_ROOM: {
-      const code = String(msg.code || '').toUpperCase();
-      const r = rooms.get(code);
-      if (!r) return c.send(S2C.ERROR, { msg: 'Room not found' });
-      if (r.world) return c.send(S2C.ERROR, { msg: 'Match already in progress' });
-      if (r.clients.length >= 10) return c.send(S2C.ERROR, { msg: 'Room is full' });
-      if (c.room) c.room.removeClient(c);
-      r.addClient(c);
-      log(`${c.name} joined room ${code}`);
+    case 'joinRoom': {
+      const code = String(m.code || '').toUpperCase();
+      const room = rooms.get(code);
+      if (!room) return send(p.ws, 'error', { msg: 'Room not found' });
+      if (room.started) return send(p.ws, 'error', { msg: 'Match already in progress' });
+      if (room.peers.size >= 10) return send(p.ws, 'error', { msg: 'Room is full' });
+      if (p.room) leaveRoom(p);
+      room.peers.set(p.id, p);
+      p.room = room;
+      log(`${p.name} joined room ${code}`);
+      broadcastLobby(room);
       break;
     }
-    case C2S.LEAVE_ROOM: {
-      if (c.room) c.room.removeClient(c);
+    case 'leaveRoom': {
+      if (p.room) leaveRoom(p);
       break;
     }
-    case C2S.LOBBY_READY: {
-      if (!c.room) return;
-      c.room.lobbyReady.set(c.id, !!msg.ready);
-      c.room.broadcastLobby();
+    case 'lobbyReady': {
+      if (!p.room) return;
+      p.ready = !!m.ready;
+      broadcastLobby(p.room);
       break;
     }
-    case C2S.START_GAME: {
-      if (!c.room) return;
-      if (c.room.host !== c.id) return c.send(S2C.ERROR, { msg: 'Only host can start' });
-      c.room.start();
+    case 'startGame': {
+      const room = p.room;
+      if (!room) return;
+      if (room.hostId !== p.id) return send(p.ws, 'error', { msg: 'Only host can start' });
+      room.started = true;
+      // Tell each peer who else is in the room. The host uses the list to
+      // know whom to open a DataChannel to; joiners use it to remember the
+      // host's id (they'll receive an SDP offer addressed from that id).
+      for (const each of room.peers.values()) {
+        const others = [...room.peers.values()]
+          .filter(o => o.id !== each.id)
+          .map(o => ({ id: o.id, name: o.name, color: o.color }));
+        send(each.ws, 'gameStart', {
+          yourId: each.id,
+          hostId: room.hostId,
+          peers: others,
+        });
+      }
+      log(`room ${room.code} started`);
       break;
     }
-    case C2S.INPUT: {
-      c.input = msg.input || {};
+    // RTC signaling — strict relay to one peer in the same room.
+    case 'rtcOffer':
+    case 'rtcAnswer':
+    case 'rtcIce': {
+      if (!p.room) return;
+      const dest = p.room.peers.get(String(m.to));
+      if (!dest) return;
+      const fwd = { from: p.id };
+      if (m.sdp) fwd.sdp = m.sdp;
+      if (m.candidate) fwd.candidate = m.candidate;
+      send(dest.ws, m.t, fwd);
       break;
     }
   }
 }
 
+function leaveRoom(peer) {
+  const room = peer.room;
+  peer.room = null;
+  if (!room) return;
+  room.peers.delete(peer.id);
+  if (room.peers.size === 0) {
+    rooms.delete(room.code);
+    log(`room ${room.code} closed`);
+  } else if (room.hostId === peer.id) {
+    // Host left — boot everyone. We don't migrate hosts mid-match because
+    // the host's browser owns the authoritative World; there's no state to
+    // hand off.
+    for (const p of room.peers.values()) {
+      send(p.ws, 'kicked', { reason: 'Host left the match' });
+      p.room = null;
+    }
+    rooms.delete(room.code);
+    log(`room ${room.code} closed (host left)`);
+  } else {
+    broadcastLobby(room);
+  }
+}
+
 const shutdown = () => {
   log('shutting down');
-  for (const r of rooms.values()) r.shutdown();
   wss.close();
   httpServer.close();
   setTimeout(() => process.exit(0), 100);
