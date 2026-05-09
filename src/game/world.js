@@ -139,6 +139,23 @@ function refillMagsFromReserve(p) {
     p.ammoReserve[k] -= give;
   }
 }
+// When the active weapon has no shots and no reserve, fall back to the best
+// owned weapon that can still fire. Pistol's mag is Infinity, so this can
+// always at least find pistol — the player is never stranded.
+function autoSwitchOnEmpty(p) {
+  for (let i = WEAPON_ORDER.length - 1; i >= 0; i--) {
+    const k = WEAPON_ORDER[i];
+    if (k === p.weapon || !p.owned[k]) continue;
+    const w = WEAPONS[k];
+    if (w.magSize === Infinity || p.mag[k] > 0 || p.ammoReserve[k] > 0) {
+      p.weapon = k;
+      p.fireCdMs = 120;
+      p.reloadMs = 0;
+      return k;
+    }
+  }
+  return null;
+}
 
 function buildWaveComposition(n, playerCount = 1) {
   // Scale wave size with squad size so 10 players don't crush a wave built for 1.
@@ -399,8 +416,19 @@ export class World {
     const w = WEAPONS[p.weapon];
     if (w.magSize !== Infinity) {
       if (p.mag[w.key] <= 0) {
-        if (p.ammoReserve[w.key] > 0) startReload(p);
-        else { p.fireCdMs = 220; this.events.push({ type:'empty', playerId: p.id }); }
+        if (p.ammoReserve[w.key] > 0) {
+          startReload(p);
+        } else {
+          // Empty mag, empty reserve — bail to a usable weapon if we have one,
+          // otherwise just dry-fire so the player gets the empty-click feedback.
+          const switched = autoSwitchOnEmpty(p);
+          if (switched) {
+            this.events.push({ type:'weapon_switched', playerId: p.id, weapon: switched });
+          } else {
+            p.fireCdMs = 220;
+            this.events.push({ type:'empty', playerId: p.id });
+          }
+        }
         return;
       }
       p.mag[w.key] -= 1;
@@ -425,6 +453,12 @@ export class World {
     }
     p.muzzleFlash = 0.06;
     this.events.push({ type:'fire', playerId: p.id, x: muzzleX, y: muzzleY, angle: p.angle, weapon: w.key });
+    // Just emptied the mag with no reserve to reload from? Switch to a usable
+    // weapon now so the next press doesn't dry-fire on a dead gun.
+    if (w.magSize !== Infinity && p.mag[w.key] === 0 && p.ammoReserve[w.key] === 0) {
+      const switched = autoSwitchOnEmpty(p);
+      if (switched) this.events.push({ type:'weapon_switched', playerId: p.id, weapon: switched });
+    }
   }
 
   // ----- Zombies -----
