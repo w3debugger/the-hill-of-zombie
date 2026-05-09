@@ -1,0 +1,26 @@
+# Render Blueprint for the signaling server.
+# https://render.com/docs/blueprint-spec
+#
+# This deploys server/index.js as a free web service with the signaling
+# WebSocket on the public URL Render assigns. Once deployed, set
+# VITE_WS_URL=wss://<your-service>.onrender.com on the Vercel frontend.
+#
+# The server is signaling-only — it manages 4-char room codes and relays
+# SDP/ICE between peers. Once peers' DataChannels are open, gameplay
+# traffic flows browser-to-browser; this service is dormant until the next
+# room create/join. So the free tier's sleep-after-15-min behavior only
+# affects the moment someone creates or joins a room, never gameplay.
+
+services:
+  - type: web
+    name: hill-of-zombie-server
+    runtime: node
+    plan: free
+    region: oregon          # change to a region near most of your players
+    buildCommand: npm install
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
