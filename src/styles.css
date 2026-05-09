@@ -1392,6 +1392,52 @@ button { font-family: inherit; }
     0 4px 14px rgba(0,0,0,0.55);
 }
 
+/* Weapon-swap button — sits above-left of the fire button. Tap cycles to the
+   next owned weapon; the label shows what you'll switch to. Hidden when the
+   player only owns the pistol. */
+.touch-swap {
+  position: absolute;
+  right: 158px;
+  bottom: 60px;
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  pointer-events: auto;
+  touch-action: none;
+  background: radial-gradient(circle at 35% 30%, #1c2632 0%, #0f1620 60%, #060a10 100%);
+  border: 2px solid #5fa9ff;
+  color: #ffd6b0;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  box-shadow:
+    0 0 18px rgba(95, 169, 255, 0.35),
+    inset 0 0 14px rgba(95, 169, 255, 0.12),
+    0 4px 14px rgba(0,0,0,0.55);
+  transition: transform 0.08s ease, box-shadow 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.touch-swap:active {
+  transform: scale(0.94);
+  box-shadow:
+    0 0 26px rgba(95, 169, 255, 0.65),
+    inset 0 0 18px rgba(180, 220, 255, 0.35),
+    0 3px 10px rgba(0,0,0,0.55);
+}
+.touch-swap svg { display: block; filter: drop-shadow(0 0 4px rgba(95, 169, 255, 0.6)); }
+.touch-swap-label {
+  position: absolute;
+  bottom: 6px;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  color: #cfe7ff;
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+}
+
 /* On true desktop (no coarse pointer at all) we don't even render the
    component — IS_TOUCH gates it from App.jsx. As a safety net, hide it
    when the device has *only* fine pointers. iPad with a trackpad still
@@ -1476,6 +1522,13 @@ button { font-family: inherit; }
   }
   .touch-fire svg { width: 44px; height: 44px; }
   .touch-fire-label { font-size: 9px; bottom: 6px; }
+  .touch-swap {
+    width: 64px; height: 64px;
+    right: calc(max(18px, env(safe-area-inset-right)) + 106px);
+    bottom: max(36px, calc(env(safe-area-inset-bottom) + 18px));
+  }
+  .touch-swap svg { width: 22px; height: 22px; }
+  .touch-swap-label { font-size: 8px; letter-spacing: 0.16em; bottom: 4px; }
 }
 
 /* iPad / tablet: nudge the touch UI inset off the home indicator. */
@@ -1485,6 +1538,10 @@ button { font-family: inherit; }
   .touch-fire {
     right: max(36px, env(safe-area-inset-right));
     bottom: max(36px, env(safe-area-inset-bottom));
+  }
+  .touch-swap {
+    right: calc(max(36px, env(safe-area-inset-right)) + 130px);
+    bottom: max(60px, calc(env(safe-area-inset-bottom) + 32px));
   }
 }
 

@@ -304,12 +304,48 @@ export function Pause({ onResume, onQuit }) {
 // Left side: fixed thumbstick pinned to the bottom-left (its CSS position).
 // Right side: fire button. Both use PointerEvents so a single finger on each
 // side works simultaneously.
+function nextOwnedWeapon(p) {
+  const i = WEAPON_ORDER.indexOf(p.weapon);
+  for (let off = 1; off < WEAPON_ORDER.length; off++) {
+    const k = WEAPON_ORDER[(i + off) % WEAPON_ORDER.length];
+    if (p.owned[k]) return k;
+  }
+  return p.weapon;
+}
+
 export function TouchControls({ gameRef }) {
   const stickZoneRef = useRef(null);
   const knobRef = useRef(null);
   const baseRef = useRef(null);
   const fireBtnRef = useRef(null);
+  const swapBtnRef = useRef(null);
+  const swapLabelRef = useRef(null);
   const stateRef = useRef({ joyId: null, cx: 0, cy: 0, fireId: null });
+
+  // Keep the swap button's label synced to the next-cycle weapon, and hide it
+  // when the player only owns the pistol (nothing to swap to).
+  useEffect(() => {
+    let raf;
+    const tick = () => {
+      const g = gameRef.current;
+      const btn = swapBtnRef.current;
+      const lbl = swapLabelRef.current;
+      if (g && g.world && btn && lbl) {
+        const me = g.world.players.find(p => p.id === g.localPlayerId);
+        if (me) {
+          const ownedCount = WEAPON_ORDER.reduce((n, k) => n + (me.owned[k] ? 1 : 0), 0);
+          btn.style.display = ownedCount > 1 ? '' : 'none';
+          if (ownedCount > 1) {
+            const next = nextOwnedWeapon(me);
+            lbl.textContent = WEAPONS[next].name;
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   useEffect(() => {
     const zone = stickZoneRef.current;
@@ -373,6 +409,18 @@ export function TouchControls({ gameRef }) {
       try { fireBtn.releasePointerCapture(e.pointerId); } catch {}
     };
 
+    const swapBtn = swapBtnRef.current;
+    const onSwap = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const g = gameRef.current;
+      if (!g || !g.world) return;
+      const me = g.world.players.find(p => p.id === g.localPlayerId);
+      if (!me) return;
+      const next = nextOwnedWeapon(me);
+      if (next && next !== me.weapon) g.input.weaponEdge = next;
+    };
+
     zone.addEventListener('pointerdown', onZoneDown);
     zone.addEventListener('pointermove', onZoneMove);
     zone.addEventListener('pointerup', onZoneUp);
@@ -380,6 +428,7 @@ export function TouchControls({ gameRef }) {
     fireBtn.addEventListener('pointerdown', onFireDown);
     fireBtn.addEventListener('pointerup', onFireUp);
     fireBtn.addEventListener('pointercancel', onFireUp);
+    if (swapBtn) swapBtn.addEventListener('pointerdown', onSwap);
 
     return () => {
       zone.removeEventListener('pointerdown', onZoneDown);
@@ -389,6 +438,7 @@ export function TouchControls({ gameRef }) {
       fireBtn.removeEventListener('pointerdown', onFireDown);
       fireBtn.removeEventListener('pointerup', onFireUp);
       fireBtn.removeEventListener('pointercancel', onFireUp);
+      if (swapBtn) swapBtn.removeEventListener('pointerdown', onSwap);
     };
   }, []);
 
@@ -414,6 +464,13 @@ export function TouchControls({ gameRef }) {
                 fill="#ffd166" />
         </svg>
         <span class="touch-fire-label">FIRE</span>
+      </button>
+      <button class="touch-swap" ref={swapBtnRef} aria-label="Switch weapon">
+        <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+          <path d="M7 7h11l-3-3M17 17H6l3 3" fill="none" stroke="#ffd6b0" stroke-width="2.4"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span class="touch-swap-label" ref={swapLabelRef}>SWAP</span>
       </button>
     </div>
   );
