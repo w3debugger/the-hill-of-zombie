@@ -16,11 +16,22 @@ export class AudioBus {
     this.muted = false;
     this.volume = 0.7;
     this.ambience = null;
+    this.unsupported = false;
   }
   ensure() {
+    if (this.unsupported) return;
     if (!this.ctx) {
-      const C = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new C();
+      const C = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
+      // Old browsers (notably any IE, plus very early Android) have no Web
+      // Audio. Mark unsupported once and become a silent no-op for the rest
+      // of the session — the game still plays, just without sound.
+      if (!C) { this.unsupported = true; return; }
+      try {
+        this.ctx = new C();
+      } catch (e) {
+        this.unsupported = true;
+        return;
+      }
       this.master = this.ctx.createGain();
       this.master.gain.value = this.muted ? 0 : this.volume;
       this.master.connect(this.ctx.destination);
@@ -32,7 +43,9 @@ export class AudioBus {
       this.dryBus.connect(this.master);
       this.wetBus.connect(this.convolver).connect(this.master);
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx.state === 'suspended') {
+      try { this.ctx.resume(); } catch (e) {}
+    }
   }
   _buildReverb() {
     const a = this.ctx;
@@ -297,8 +310,11 @@ const SFX = {
 
 AudioBus.prototype.play = function (name) {
   try { this.ensure(); } catch (e) { return; }
+  if (!this.ctx) return;
   const fn = SFX[name];
-  if (fn) fn(this);
+  if (fn) {
+    try { fn(this); } catch (e) {}
+  }
 };
 
 // ---- Ambience controller ----
@@ -410,6 +426,7 @@ class Ambience {
 
 AudioBus.prototype.startAmbience = function () {
   try { this.ensure(); } catch (e) { return; }
+  if (!this.ctx) return;
   if (!this.ambience) this.ambience = new Ambience(this);
   this.ambience.start();
 };

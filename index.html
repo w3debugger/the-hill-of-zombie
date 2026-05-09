@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -11,9 +12,68 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;900&family=Special+Elite&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+#unsupported {
+  position: fixed; inset: 0; top: 0; left: 0; right: 0; bottom: 0;
+  background: #0a0d10; color: #d6d8dc;
+  font-family: Rubik, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+  display: none;
+  z-index: 9999;
+  padding: 24px;
+  box-sizing: border-box;
+}
+#unsupported .box {
+  max-width: 480px; margin: 12vh auto 0; text-align: center;
+}
+#unsupported h1 { font-size: 28px; margin: 0 0 12px; color: #f0c33c; letter-spacing: 1px; }
+#unsupported p { line-height: 1.45; margin: 0 0 10px; }
+#unsupported small { display: block; margin-top: 14px; opacity: 0.6; font-size: 12px; }
+</style>
 </head>
 <body>
 <div id="root"></div>
+<div id="unsupported">
+  <div class="box">
+    <h1>BROWSER TOO OLD</h1>
+    <p>The Hill of Zombie needs a browser that supports the HTML5 Canvas, WebSockets, and Web Audio.</p>
+    <p>Please update to a recent version of Chrome, Firefox, Safari, or Edge.</p>
+    <small id="missing"></small>
+  </div>
+</div>
+<script>
+// ES3-clean feature detect. Runs in IE6+ without syntax errors so even very
+// old browsers see the friendly message instead of a blank page.
+(function () {
+  var missing = [];
+  try {
+    var c = document.createElement('canvas');
+    if (!c.getContext || !c.getContext('2d')) missing.push('Canvas 2D');
+  } catch (e) { missing.push('Canvas 2D'); }
+  if (typeof window.WebSocket === 'undefined') missing.push('WebSocket');
+  // requestAnimationFrame ships in every browser we support; missing here
+  // means we're well below the floor.
+  if (!window.requestAnimationFrame && !window.webkitRequestAnimationFrame
+      && !window.mozRequestAnimationFrame && !window.msRequestAnimationFrame) {
+    missing.push('requestAnimationFrame');
+  }
+  if (missing.length) {
+    var el = document.getElementById('unsupported');
+    var m = document.getElementById('missing');
+    if (el) el.style.display = 'block';
+    if (m) m.innerHTML = 'Missing: ' + missing.join(', ');
+    // Stop the module/legacy script tags from even trying — they will
+    // syntax-error in old browsers and waste cycles otherwise. Removing them
+    // before they run is the cleanest bail-out.
+    var s = document.getElementsByTagName('script');
+    for (var i = s.length - 1; i >= 0; i--) {
+      var src = s[i].getAttribute('src') || '';
+      if (src.indexOf('/assets/') >= 0 || s[i].type === 'module') {
+        s[i].parentNode.removeChild(s[i]);
+      }
+    }
+  }
+})();
+</script>
 <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>
