@@ -561,24 +561,61 @@ export class Renderer {
     const c = this.worldToScreen(0, 0);
     ctx.save();
     ctx.translate(c.x, c.y);
-    const grad = ctx.createRadialGradient(0, -20, HILL_CORE_R * 0.4, 0, 0, HILL_R);
-    grad.addColorStop(0, '#5b6a3c');
-    grad.addColorStop(0.6, '#3e4a28');
-    grad.addColorStop(1, 'rgba(40, 50, 28, 0)');
-    ctx.fillStyle = grad;
+
+    // 1) Drop shadow on the south-east side of the hill base — the slope casts
+    //    a long shadow on the ground, which is the strongest top-down depth cue.
+    const shadow = ctx.createRadialGradient(28, 22, HILL_R * 0.55, 28, 22, HILL_R * 1.18);
+    shadow.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+    shadow.addColorStop(0.55, 'rgba(0, 0, 0, 0.28)');
+    shadow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = shadow;
+    ctx.beginPath(); ctx.arc(28, 22, HILL_R * 1.18, 0, TAU); ctx.fill();
+
+    // 2) Slope: darker at the foot, brighter near the crown — light from NW.
+    //    Off-center radial gradient sells the dome.
+    const slope = ctx.createRadialGradient(-HILL_R * 0.35, -HILL_R * 0.35, HILL_R * 0.15, 0, 0, HILL_R);
+    slope.addColorStop(0,    '#7a8a52');
+    slope.addColorStop(0.35, '#5d6a3c');
+    slope.addColorStop(0.7,  '#3a4624');
+    slope.addColorStop(1,    'rgba(28, 36, 18, 0)');
+    ctx.fillStyle = slope;
     ctx.beginPath(); ctx.arc(0, 0, HILL_R, 0, TAU); ctx.fill();
-    ctx.strokeStyle = 'rgba(20, 24, 16, 0.35)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 4; i++) {
-      ctx.beginPath(); ctx.arc(0, 0, HILL_R - 28 - i * 32, 0, TAU); ctx.stroke();
+
+    // 3) Contour rings — concentric, tighter near the crown to imply steepness.
+    //    Each ring has a faint highlight on its NW edge and shadow on its SE edge.
+    const rings = [HILL_R - 18, HILL_R - 46, HILL_R - 80, HILL_R - 118, HILL_CORE_R + 18];
+    for (const rr of rings) {
+      if (rr <= HILL_CORE_R) break;
+      // shadow edge (south-east)
+      ctx.strokeStyle = 'rgba(14, 18, 10, 0.45)';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(0, 0, rr, 0.05, Math.PI - 0.05); ctx.stroke();
+      // highlight edge (north-west)
+      ctx.strokeStyle = 'rgba(180, 200, 140, 0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(0, 0, rr, Math.PI + 0.05, TAU - 0.05); ctx.stroke();
     }
+
+    // 4) Slope detail: scatter rocks and grass tufts on the slope (deterministic).
+    this._drawHillDetail();
+
+    // 5) Rim highlight where the crown plateau meets the slope.
+    ctx.strokeStyle = 'rgba(220, 230, 180, 0.22)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, HILL_CORE_R + 4, Math.PI + 0.2, TAU - 0.2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(10, 14, 6, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, HILL_CORE_R + 4, 0.2, Math.PI - 0.2); ctx.stroke();
+
+    // 6) Crown plateau — flatter, paler, slight dome shading.
     const hpRatio = clamp(world.hill.hp / world.hill.maxHp, 0, 1);
-    const coreGrad = ctx.createRadialGradient(0, -10, 5, 0, 0, HILL_CORE_R);
+    const coreGrad = ctx.createRadialGradient(-HILL_CORE_R * 0.3, -HILL_CORE_R * 0.3, 4, 0, 0, HILL_CORE_R);
     const coreCol = lerp(120, 50, 1 - hpRatio);
-    coreGrad.addColorStop(0, `rgb(${coreCol + 60}, ${coreCol + 80}, ${coreCol + 40})`);
-    coreGrad.addColorStop(1, `rgb(${coreCol}, ${coreCol + 20}, ${coreCol - 10})`);
+    coreGrad.addColorStop(0, `rgb(${coreCol + 80}, ${coreCol + 95}, ${coreCol + 55})`);
+    coreGrad.addColorStop(1, `rgb(${coreCol - 10}, ${coreCol + 5}, ${coreCol - 25})`);
     ctx.fillStyle = coreGrad;
     ctx.beginPath(); ctx.arc(0, 0, HILL_CORE_R, 0, TAU); ctx.fill();
+
     // signal tower instead of just a flag
     this.drawSignalTower(hpRatio);
     ctx.strokeStyle = 'rgba(255,255,255,0.05)';
@@ -595,6 +632,67 @@ export class Renderer {
       ctx.beginPath(); ctx.arc(0, 0, HILL_CORE_R + 10, -Math.PI / 2, -Math.PI / 2 + TAU * hpRatio); ctx.stroke();
       ctx.restore();
     }
+  }
+
+  // Cache slope decoration on a sprite so we don't regenerate per frame.
+  _drawHillDetail() {
+    if (!this._hillDetailCanvas) {
+      const size = HILL_R * 2 + 40;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const cx = c.getContext('2d');
+      cx.translate(size / 2, size / 2);
+      // deterministic pseudo-random based on index
+      const r2 = (i, off) => {
+        const v = Math.sin(i * 12.9898 + off * 78.233) * 43758.5453;
+        return v - Math.floor(v);
+      };
+      // Rocks scattered on the slope band (between core and rim).
+      const rockN = 36;
+      for (let i = 0; i < rockN; i++) {
+        const a = r2(i, 1) * TAU;
+        const t = 0.18 + r2(i, 2) * 0.78;
+        const dist = HILL_CORE_R + (HILL_R - HILL_CORE_R - 8) * t;
+        const x = Math.cos(a) * dist;
+        const y = Math.sin(a) * dist * 0.96;
+        const rr = 2 + r2(i, 3) * 4;
+        // shadow under rock (offset SE)
+        cx.fillStyle = 'rgba(0,0,0,0.5)';
+        cx.beginPath(); cx.ellipse(x + rr * 0.4, y + rr * 0.5, rr * 1.05, rr * 0.55, 0, 0, TAU); cx.fill();
+        // rock body (lit from NW)
+        const grad = cx.createRadialGradient(x - rr * 0.4, y - rr * 0.4, 0, x, y, rr);
+        grad.addColorStop(0, '#8a8478');
+        grad.addColorStop(1, '#3a342a');
+        cx.fillStyle = grad;
+        cx.beginPath(); cx.arc(x, y, rr, 0, TAU); cx.fill();
+      }
+      // Grass tufts — short outward strokes.
+      const tuftN = 80;
+      cx.lineCap = 'round';
+      for (let i = 0; i < tuftN; i++) {
+        const a = r2(i, 5) * TAU;
+        const t = 0.05 + r2(i, 6) * 0.92;
+        const dist = HILL_CORE_R - 10 + (HILL_R - HILL_CORE_R) * t;
+        const x = Math.cos(a) * dist;
+        const y = Math.sin(a) * dist * 0.96;
+        // outward direction
+        const ox = Math.cos(a), oy = Math.sin(a);
+        const lit = (ox * -0.7 + oy * -0.7) > 0; // NW-facing tufts are brighter
+        cx.strokeStyle = lit ? 'rgba(140, 165, 80, 0.55)' : 'rgba(70, 90, 40, 0.55)';
+        cx.lineWidth = 1;
+        for (let k = -1; k <= 1; k++) {
+          cx.beginPath();
+          cx.moveTo(x + k * 0.8, y);
+          cx.lineTo(x + ox * 2.8 + k * 0.6, y + oy * 2.8 - 2);
+          cx.stroke();
+        }
+      }
+      cx.lineCap = 'butt';
+      this._hillDetailCanvas = c;
+    }
+    const ctx = this.ctx;
+    const s = this._hillDetailCanvas;
+    ctx.drawImage(s, -s.width / 2, -s.height / 2);
   }
 
   drawSignalTower(hpRatio) {
@@ -684,49 +782,104 @@ export class Renderer {
 
   // Draws the static body parts (everything except arms, eye pupils, glow halo).
   // Used by sprite baking and during a one-time-per-zombie call.
+  // Local axes (sprite is rotated by z.angle at draw time):
+  //   +x = forward (the direction the zombie faces / head is)
+  //   +y = right side (perpendicular)
   _paintZombieBody(cx, z) {
     const r = z.r;
     const seed = z.seed;
-    // tattered cloth silhouette
     const clothCol = (
       z.type === 'walker' ? '#241c12' :
       z.type === 'runner' ? '#1a1820' :
       z.type === 'brute'  ? '#1c0a0a' :
                             '#1d2a14'
     );
-    cx.fillStyle = clothCol;
-    cx.beginPath();
-    const N = 14;
-    for (let i = 0; i < N; i++) {
-      const a = (i / N) * TAU;
-      const j = ((Math.sin(seed * 7.1 + i * 1.7) + 1) * 0.5);
-      const k = ((Math.sin(seed * 3.3 + i * 4.2) + 1) * 0.5);
-      const radius = r * (1.04 + 0.22 * j) * (0.85 + 0.18 * k);
-      const x = Math.cos(a) * radius;
-      const y = Math.sin(a) * radius * 0.86;
-      if (i === 0) cx.moveTo(x, y); else cx.lineTo(x, y);
-    }
-    cx.closePath(); cx.fill();
-    cx.strokeStyle = 'rgba(0,0,0,0.55)';
-    cx.lineWidth = 1;
-    for (let i = 0; i < 2; i++) {
-      const a = seed + i * 2.4;
-      cx.beginPath();
-      cx.moveTo(Math.cos(a) * r * 0.7, Math.sin(a) * r * 0.6);
-      cx.lineTo(Math.cos(a) * r * 1.05, Math.sin(a) * r * 0.95);
-      cx.stroke();
-    }
-    // body
+    const skinCol = (
+      z.type === 'walker' ? '#9c8a6c' :
+      z.type === 'runner' ? '#8a6e4e' :
+      z.type === 'brute'  ? '#7a5848' :
+                            '#9aa878'
+    );
     const bodyCol = (
       z.type === 'walker' ? '#5d6a4a' :
       z.type === 'runner' ? '#6a5a3a' :
       z.type === 'brute'  ? '#4a3a36' :
                             '#7a8a4a'
     );
+
+    // ---- Legs (drawn first; trail behind, partially under torso) ----
+    // Two legs splayed slightly behind the torso. One foot drags (limp) — picked
+    // by seed so each zombie has its own gait.
+    const limpSide = (Math.sin(seed * 17.7) > 0) ? -1 : 1;
+    const legSpread = r * 0.34;
+    const legLen = r * 0.95;
+    for (const side of [-1, 1]) {
+      const drag = side === limpSide ? 0.7 : 1;
+      // shadow under leg
+      cx.fillStyle = 'rgba(0,0,0,0.4)';
+      cx.beginPath();
+      cx.ellipse(-legLen * 0.55 * drag + 1, side * legSpread + 1, legLen * 0.45 * drag, r * 0.18, 0, 0, TAU);
+      cx.fill();
+      // pant leg
+      cx.fillStyle = clothCol;
+      cx.save();
+      cx.translate(-r * 0.18, side * legSpread);
+      cx.rotate(side * 0.15 * (1 - drag));
+      cx.beginPath();
+      cx.ellipse(-legLen * 0.5 * drag, 0, legLen * 0.5 * drag, r * 0.22, 0, 0, TAU);
+      cx.fill();
+      // boot/foot at end
+      cx.fillStyle = '#0c0806';
+      cx.beginPath();
+      cx.ellipse(-legLen * drag, 0, r * 0.22, r * 0.16, 0, 0, TAU);
+      cx.fill();
+      // exposed shin if torn pants (random)
+      if (((seed * 31 + side) | 0) % 3 === 0) {
+        cx.fillStyle = skinCol;
+        cx.fillRect(-legLen * 0.85 * drag, -1.5, r * 0.2, 3);
+      }
+      cx.restore();
+    }
+
+    // ---- Torso ground shadow ----
+    cx.fillStyle = 'rgba(0,0,0,0.32)';
+    cx.beginPath(); cx.ellipse(2, 2, r * 0.95, r * 0.55, 0, 0, TAU); cx.fill();
+
+    // ---- Torso (clothing) — oriented along forward axis, wider at shoulders ----
+    // Shoulders are wider (perpendicular to facing dir), chest tapers.
+    cx.fillStyle = clothCol;
+    cx.beginPath();
+    // ellipse longer side-to-side gives clear shoulder line in top-down view
+    cx.ellipse(-r * 0.05, 0, r * 0.7, r * 0.78, 0, 0, TAU);
+    cx.fill();
+    // tattered shirt edges — short jagged strokes around the cloth perimeter
+    cx.strokeStyle = 'rgba(8, 6, 4, 0.7)';
+    cx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      const a = seed * 4 + i * 1.05;
+      const x0 = Math.cos(a) * r * 0.55, y0 = Math.sin(a) * r * 0.62;
+      const x1 = x0 + Math.cos(a) * (2 + (Math.sin(seed + i) + 1) * 1.5);
+      const y1 = y0 + Math.sin(a) * (2 + (Math.sin(seed + i) + 1) * 1.5);
+      cx.beginPath(); cx.moveTo(x0, y0); cx.lineTo(x1, y1); cx.stroke();
+    }
+    // exposed chest/belly skin patch where shirt is torn
     cx.fillStyle = bodyCol;
-    cx.beginPath(); cx.ellipse(0, 0, r * 0.86, r * 0.7, 0, 0, TAU); cx.fill();
+    cx.beginPath(); cx.ellipse(r * 0.1, 0, r * 0.42, r * 0.34, 0, 0, TAU); cx.fill();
     cx.fillStyle = 'rgba(0,0,0,0.28)';
-    cx.beginPath(); cx.ellipse(0, r * 0.18, r * 0.82, r * 0.45, 0, 0, TAU); cx.fill();
+    cx.beginPath(); cx.ellipse(r * 0.05, r * 0.12, r * 0.4, r * 0.22, 0, 0, TAU); cx.fill();
+
+    // ---- Shoulder pads — clearly read as shoulders from above ----
+    for (const side of [-1, 1]) {
+      cx.fillStyle = clothCol;
+      cx.beginPath();
+      cx.ellipse(-r * 0.05, side * r * 0.62, r * 0.32, r * 0.24, 0, 0, TAU);
+      cx.fill();
+      // highlight on shoulder top (sells roundness)
+      cx.fillStyle = 'rgba(255, 255, 240, 0.06)';
+      cx.beginPath();
+      cx.ellipse(-r * 0.1, side * r * 0.62, r * 0.22, r * 0.14, 0, 0, TAU);
+      cx.fill();
+    }
     // decay patches
     const decayN = 4 + ((seed * 13) | 0) % 3;
     const palette = ['#3a1010', '#5a2010', '#2a2a14', '#1a0e0a'];
