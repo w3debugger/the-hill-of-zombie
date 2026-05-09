@@ -1,7 +1,5 @@
 // Thin WebSocket client used during multiplayer sessions.
 
-import { C2S, S2C } from './protocol.js';
-
 export class NetClient {
   constructor(url) {
     this.url = url;
@@ -61,6 +59,3 @@ export class NetClient {
     this.handlers.clear();
   }
 }
-
-export const C2S_T = C2S;
-export const S2C_T = S2C;

@@ -13,7 +13,7 @@ import {
 // Mutates p in place. Only touches movement/orientation; combat-side effects
 // (dodge initiation, fire, reload, stamina drain, dodge cooldowns) stay in
 // updatePlayers because they generate events and we don't replay events.
-export function applyPlayerMovement(p, input, dt) {
+function applyPlayerMovement(p, input, dt) {
   if (p.dead) return;
   const ix = clamp(input.mx || 0, -1, 1);
   const iy = clamp(input.my || 0, -1, 1);
@@ -789,7 +789,6 @@ export class World {
         id: p.id,
         dead: p.dead, ready: p.ready,
         x: r1(p.x), y: r1(p.y),
-        vx: r1(p.vx), vy: r1(p.vy),
         hp: r1(p.hp), maxHp: p.maxHp,
         angle: r2(p.angle),
         weapon: p.weapon,
@@ -799,9 +798,7 @@ export class World {
         hurtFlash: p.hurtFlash > 0 ? r2(p.hurtFlash) : 0,
         iframesMs: p.iframesMs > 0 ? r2(p.iframesMs) : 0,
         reloadMs: p.reloadMs | 0,
-        fireCdMs: p.fireCdMs | 0,
         stamina: r2(p.stamina), maxStamina: p.maxStamina,
-        dodgeMs: p.dodgeMs > 0 ? r2(p.dodgeMs) : 0,
       });
     }
     const zombies = new Array(this.zombies.length);
