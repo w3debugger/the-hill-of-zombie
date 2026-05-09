@@ -23,9 +23,6 @@ export class Renderer {
     // they see roughly the same chunk of arena as desktops. cam.zoom (kill-cam)
     // multiplies on top of this.
     this.baseZoom = 1;
-    // User-controlled zoom mode (HUD button). Multiplies into cam.zoom when no
-    // cinematic is active.
-    this.userZoom = 1;
     this.timeMs = 0;
     this.localPlayerId = null;
     this.localMuzzleFlash = 0;
@@ -47,13 +44,6 @@ export class Renderer {
     const v = this.pendingThunder;
     this.pendingThunder = false;
     return v;
-  }
-  setUserZoom(z) {
-    this.userZoom = Math.max(0.5, Math.min(3, z));
-  }
-  toggleUserZoom() {
-    this.userZoom = this.userZoom > 1.01 ? 1 : 1.6;
-    return this.userZoom;
   }
   resize() {
     this.viewW = window.innerWidth;
@@ -277,7 +267,7 @@ export class Renderer {
       const c = this.cinematic;
       if (c.age >= c.dur) {
         this.cinematic = null;
-        this.cam.zoom = this.userZoom;
+        this.cam.zoom = 1;
         this.cam.focusBlend = 0;
       }
     }
@@ -288,7 +278,7 @@ export class Renderer {
       this.localPlayerPos = lp ? { x: lp.x, y: lp.y } : null;
       let targetX = lp ? lp.x : this.cam.x;
       let targetY = lp ? lp.y : this.cam.y;
-      let targetZoom = this.userZoom;
+      let targetZoom = 1;
       let targetBlend = 0;
       // Preview/spectate: ignore players and slowly orbit the hill so the menu
       // backdrop has motion. Period is long enough that it reads as ambient

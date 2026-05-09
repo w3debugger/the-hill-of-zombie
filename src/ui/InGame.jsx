@@ -19,7 +19,7 @@ export function HUD({ gameRef }) {
   };
   const [tabHeld, setTabHeld] = useState(false);
   const [muted, setMuted] = useState(false);
-  const [zoomed, setZoomed] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     const onKey = (e) => { if (e.code === 'Tab') setTabHeld(true); };
@@ -27,6 +27,18 @@ export function HUD({ gameRef }) {
     window.addEventListener('keydown', onKey);
     window.addEventListener('keyup', onUp);
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onUp); };
+  }, []);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -87,11 +99,14 @@ export function HUD({ gameRef }) {
     setMuted(next);
     gameRef.current?.audio.setMuted(next);
   };
-  const toggleZoom = () => {
-    const r = gameRef.current?.renderer;
-    if (!r) return;
-    const z = r.toggleUserZoom();
-    setZoomed(z > 1.01);
+  const toggleFullscreen = () => {
+    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (isFs) {
+      (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+    } else {
+      const el = document.documentElement;
+      (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el);
+    }
   };
 
   return (
@@ -115,12 +130,12 @@ export function HUD({ gameRef }) {
         </div>
         <div class="hud-top-right">
           <button
-            class={`icon-btn zoom-btn ${zoomed ? 'active' : ''}`}
-            onClick={toggleZoom}
-            aria-label={zoomed ? 'Exit zoom' : 'Enter zoom mode'}
-            title={zoomed ? 'Exit zoom' : 'Zoom in'}
+            class={`icon-btn fs-btn ${fullscreen ? 'active' : ''}`}
+            onClick={toggleFullscreen}
+            aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
           >
-            {zoomed ? '🔎−' : '🔍+'}
+            {fullscreen ? '⛶' : '⛶'}
           </button>
           <button class="icon-btn mute-btn" ref={refs.muteBtn} onClick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
             {muted ? '🔇' : '🔊'}
