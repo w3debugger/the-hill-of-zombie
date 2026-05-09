@@ -231,7 +231,10 @@ export class World {
       this.updateBullets(dt);
       this.updatePickups(dt);
       this.maybeSpawn(dt);
-      if (this.inWave && this.spawnQueue.length === 0 && this.zombies.length === 0) {
+      // Hold the wave-end transition until dropped pickups are collected or
+      // expire. With no zombies left, no new pickups spawn, and pickup.life
+      // (16s) bounds the wait so this can't stall indefinitely.
+      if (this.inWave && this.spawnQueue.length === 0 && this.zombies.length === 0 && this.pickups.length === 0) {
         this.completeWave();
       }
       if (!this.flags.hillLowAnnounced && this.hill.hp < this.hill.maxHp * 0.5) {
