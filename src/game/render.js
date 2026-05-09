@@ -179,6 +179,12 @@ export class Renderer {
   }
 
   setLocalPlayer(id) { this.localPlayerId = id; }
+  setPreviewMode(on) {
+    this.previewMode = !!on;
+    // Reset orbit phase so each entry into preview starts from a known angle
+    // and the camera doesn't snap mid-orbit when toggling.
+    if (on) this.previewOrbit = 0;
+  }
   addShake(amount) { this.cam.shake = Math.min(1, this.cam.shake + amount); }
 
   // Cinematic kill cam. Phases (total ~1700ms — solo mode pauses world during it).
@@ -292,6 +298,15 @@ export class Renderer {
       let targetY = lp ? lp.y : this.cam.y;
       let targetZoom = 1;
       let targetBlend = 0;
+      // Preview/spectate: ignore players and slowly orbit the hill so the menu
+      // backdrop has motion. Period is long enough that it reads as ambient
+      // drift rather than a panning camera.
+      if (this.previewMode) {
+        this.previewOrbit = (this.previewOrbit || 0) + dt * 0.08;
+        const r = HILL_R * 1.4;
+        targetX = Math.cos(this.previewOrbit) * r;
+        targetY = Math.sin(this.previewOrbit) * r * 0.6;
+      }
       if (this.cinematic) {
         const c = this.cinematic;
         // Focus on a point biased toward the zombie (more dramatic than midpoint).
@@ -807,50 +822,57 @@ export class Renderer {
                             '#7a8a4a'
     );
 
-    // ---- Legs (drawn first; trail behind, partially under torso) ----
-    // Two legs splayed slightly behind the torso. One foot drags (limp) — picked
-    // by seed so each zombie has its own gait.
-    const limpSide = (Math.sin(seed * 17.7) > 0) ? -1 : 1;
-    const legSpread = r * 0.34;
-    const legLen = r * 0.95;
+    // ---- Legs (stride pose; feet poke past torso silhouette) ----
+    // One leg leads (foot ahead of torso), the other trails behind. From top-down
+    // the visible boots are what sells "humanoid walking" instead of "blob".
+    const leadSide = (Math.sin(seed * 17.7) > 0) ? -1 : 1;
+    const hipX = -r * 0.08;
+    const hipY = r * 0.3;
     for (const side of [-1, 1]) {
-      const drag = side === limpSide ? 0.7 : 1;
-      // shadow under leg
-      cx.fillStyle = 'rgba(0,0,0,0.4)';
-      cx.beginPath();
-      cx.ellipse(-legLen * 0.55 * drag + 1, side * legSpread + 1, legLen * 0.45 * drag, r * 0.18, 0, 0, TAU);
-      cx.fill();
-      // pant leg
-      cx.fillStyle = clothCol;
+      const leading = side === leadSide;
+      const footX = leading ? r * 0.5 : -r * 0.85;
+      const footY = side * (hipY + r * 0.12);
+      const dx = footX - hipX, dy = footY - side * hipY;
+      const len = Math.hypot(dx, dy);
+      const ang = Math.atan2(dy, dx);
       cx.save();
-      cx.translate(-r * 0.18, side * legSpread);
-      cx.rotate(side * 0.15 * (1 - drag));
+      cx.translate(hipX, side * hipY);
+      cx.rotate(ang);
+      cx.fillStyle = 'rgba(0,0,0,0.42)';
       cx.beginPath();
-      cx.ellipse(-legLen * 0.5 * drag, 0, legLen * 0.5 * drag, r * 0.22, 0, 0, TAU);
+      cx.ellipse(len * 0.5 + 1.5, 1.5, len * 0.5, r * 0.17, 0, 0, TAU);
       cx.fill();
-      // boot/foot at end
+      cx.fillStyle = clothCol;
+      cx.beginPath();
+      cx.ellipse(len * 0.5, 0, len * 0.52, r * 0.2, 0, 0, TAU);
+      cx.fill();
+      cx.fillStyle = 'rgba(0,0,0,0.25)';
+      cx.beginPath();
+      cx.ellipse(len * 0.5, 0, len * 0.12, r * 0.18, 0, 0, TAU);
+      cx.fill();
       cx.fillStyle = '#0c0806';
       cx.beginPath();
-      cx.ellipse(-legLen * drag, 0, r * 0.22, r * 0.16, 0, 0, TAU);
+      cx.ellipse(len * 0.95, 0, r * 0.3, r * 0.18, 0, 0, TAU);
       cx.fill();
-      // exposed shin if torn pants (random)
+      cx.fillStyle = 'rgba(255, 240, 220, 0.08)';
+      cx.beginPath();
+      cx.ellipse(len * 1.05, -r * 0.04, r * 0.1, r * 0.06, 0, 0, TAU);
+      cx.fill();
       if (((seed * 31 + side) | 0) % 3 === 0) {
         cx.fillStyle = skinCol;
-        cx.fillRect(-legLen * 0.85 * drag, -1.5, r * 0.2, 3);
+        cx.fillRect(len * 0.6, -1.5, r * 0.22, 3);
       }
       cx.restore();
     }
 
     // ---- Torso ground shadow ----
     cx.fillStyle = 'rgba(0,0,0,0.32)';
-    cx.beginPath(); cx.ellipse(2, 2, r * 0.95, r * 0.55, 0, 0, TAU); cx.fill();
+    cx.beginPath(); cx.ellipse(2, 2, r * 0.78, r * 0.62, 0, 0, TAU); cx.fill();
 
-    // ---- Torso (clothing) — oriented along forward axis, wider at shoulders ----
-    // Shoulders are wider (perpendicular to facing dir), chest tapers.
+    // ---- Torso (clothing) — narrower front-to-back, wider at shoulders ----
     cx.fillStyle = clothCol;
     cx.beginPath();
-    // ellipse longer side-to-side gives clear shoulder line in top-down view
-    cx.ellipse(-r * 0.05, 0, r * 0.7, r * 0.78, 0, 0, TAU);
+    cx.ellipse(-r * 0.05, 0, r * 0.58, r * 0.72, 0, 0, TAU);
     cx.fill();
     // tattered shirt edges — short jagged strokes around the cloth perimeter
     cx.strokeStyle = 'rgba(8, 6, 4, 0.7)';
@@ -1162,21 +1184,42 @@ export class Renderer {
     for (let s = -1; s <= 1; s += 2) {
       cx.save();
       const reach = s === limpSide ? 0.78 : 1.08;
-      cx.translate(r * 0.25, s * r * 0.55);
+      cx.translate(r * 0.2, s * r * 0.55);
       cx.rotate(armSwing * s * 0.6);
+      // upper arm (sleeve) — shoulder to elbow
       cx.fillStyle = clothCol;
-      cx.beginPath(); cx.ellipse(r * 0.18, 0, r * 0.3 * reach, r * 0.2, 0, 0, TAU); cx.fill();
+      cx.beginPath(); cx.ellipse(r * 0.22, 0, r * 0.34 * reach, r * 0.2, 0, 0, TAU); cx.fill();
+      // elbow joint shadow (sells the bend)
+      cx.fillStyle = 'rgba(0,0,0,0.35)';
+      cx.beginPath(); cx.arc(r * 0.5 * reach, 0, r * 0.12, 0, TAU); cx.fill();
+      // forearm (bare skin) — elbow to wrist
       cx.fillStyle = handCol;
-      cx.beginPath(); cx.ellipse(r * 0.5 * reach, 0, r * 0.32 * reach, r * 0.16, 0, 0, TAU); cx.fill();
-      cx.beginPath(); cx.arc(r * 0.78 * reach, 0, r * 0.16, 0, TAU); cx.fill();
-      cx.strokeStyle = '#0a0202';
-      cx.lineWidth = 1.1; cx.lineCap = 'round';
-      cx.beginPath();
-      cx.moveTo(r * 0.86 * reach, -3); cx.lineTo(r * 1.02 * reach, -4);
-      cx.moveTo(r * 0.86 * reach, 0);  cx.lineTo(r * 0.98 * reach, 0);
-      cx.moveTo(r * 0.86 * reach, 3);  cx.lineTo(r * 1.02 * reach, 4);
-      cx.stroke();
-      cx.lineCap = 'butt';
+      cx.beginPath(); cx.ellipse(r * 0.7 * reach, 0, r * 0.3 * reach, r * 0.15, 0, 0, TAU); cx.fill();
+      // forearm shading
+      cx.fillStyle = 'rgba(0,0,0,0.2)';
+      cx.beginPath(); cx.ellipse(r * 0.7 * reach, r * 0.06, r * 0.28 * reach, r * 0.07, 0, 0, TAU); cx.fill();
+      // wrist
+      cx.fillStyle = '#1a0e08';
+      cx.beginPath(); cx.arc(r * 0.95 * reach, 0, r * 0.09, 0, TAU); cx.fill();
+      // palm
+      cx.fillStyle = handCol;
+      cx.beginPath(); cx.ellipse(r * 1.06 * reach, 0, r * 0.18, r * 0.2, 0, 0, TAU); cx.fill();
+      // palm shading
+      cx.fillStyle = 'rgba(0,0,0,0.28)';
+      cx.beginPath(); cx.ellipse(r * 1.04 * reach, r * 0.06, r * 0.16, r * 0.1, 0, 0, TAU); cx.fill();
+      // claw fingers — five splayed digits with darker tips
+      const fingerCx = r * 1.2 * reach;
+      const fingerLens = [r * 0.18, r * 0.24, r * 0.26, r * 0.22, r * 0.16];
+      const fingerYs = [r * -0.18, r * -0.09, 0, r * 0.09, r * 0.18];
+      for (let i = 0; i < 5; i++) {
+        const fy = fingerYs[i];
+        const fl = fingerLens[i];
+        cx.fillStyle = handCol;
+        cx.beginPath(); cx.ellipse(fingerCx + fl * 0.5, fy, fl * 0.55, r * 0.06, 0, 0, TAU); cx.fill();
+        // dark fingernail/claw at tip
+        cx.fillStyle = '#100604';
+        cx.beginPath(); cx.ellipse(fingerCx + fl, fy, r * 0.06, r * 0.05, 0, 0, TAU); cx.fill();
+      }
       cx.restore();
     }
   }

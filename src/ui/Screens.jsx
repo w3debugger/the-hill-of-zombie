@@ -4,40 +4,64 @@ import { INTRO_TEXT, PLAYER_COLORS } from '../game/data.js';
 // ---------- INTRO ----------
 export function Intro({ onDone }) {
   const [skipping, setSkipping] = useState(false);
+  const [phase, setPhase] = useState('coldOpen'); // 'coldOpen' | 'crawl'
   useEffect(() => {
     const onKey = (e) => { if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') onDone(); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const t = setTimeout(() => setPhase('crawl'), 3400);
+    return () => { window.removeEventListener('keydown', onKey); clearTimeout(t); };
   }, [onDone]);
   return (
     <div class={`intro ${skipping ? 'fading' : ''}`}>
       <div class="intro-bg" />
       <div class="intro-scan" />
-      <div class="intro-scroll">
-        <div class="intro-marker" />
-        {INTRO_TEXT.map((line, i) => (
-          line.kind === 'header'
-            ? <h1 class="intro-h">{line.text}</h1>
-            : line.kind === 'space'
-            ? <div class="intro-space" />
-            : <p class="intro-p">{line.text}</p>
-        ))}
-        <div class="intro-end">
-          <p class="intro-tag">— PRESS ANY KEY TO BEGIN —</p>
+      <div class="intro-flicker" />
+      <div class="intro-vignette" />
+
+      {phase === 'coldOpen' && (
+        <div class="intro-coldopen">
+          <div class="intro-tape-line">▌ FIELD RECORDING · TAPE 047</div>
+          <div class="intro-tape-line dim">BLACK RIDGE · FALL 2031</div>
+          <div class="intro-tape-line stamp">[ RECOVERED ]</div>
         </div>
-      </div>
+      )}
+
+      {phase === 'crawl' && (
+        <div class="intro-scroll">
+          <div class="intro-marker" />
+          {INTRO_TEXT.map((line, i) => (
+            line.kind === 'header'
+              ? <h1 class="intro-h">{line.text}</h1>
+              : line.kind === 'space'
+              ? <div class="intro-space" />
+              : <p class="intro-p">{line.text}</p>
+          ))}
+          <div class="intro-end">
+            <p class="intro-tag">— PRESS ANY KEY —</p>
+          </div>
+        </div>
+      )}
+
       <button class="intro-skip" onClick={() => { setSkipping(true); setTimeout(onDone, 220); }}>SKIP</button>
     </div>
   );
 }
 
 // ---------- MAIN MENU ----------
-export function MainMenu({ profile, setProfile, onSolo, onHost, onJoin, error, clearError }) {
+export function MainMenu({ profile, setProfile, onSolo, onHost, onJoin, onMinimize, error, clearError }) {
   const [showJoin, setShowJoin] = useState(false);
   const [code, setCode] = useState('');
   return (
     <div class="overlay">
       <div class="menu-card big">
+        {onMinimize && (
+          <button
+            class="menu-minimize"
+            onClick={onMinimize}
+            title="Browse the area"
+            aria-label="Browse the area"
+          >–</button>
+        )}
         <h1 class="title">THE HILL OF ZOMBIE</h1>
         <p class="subtitle">One sniper. One bunker tower. Hold until daybreak.</p>
 

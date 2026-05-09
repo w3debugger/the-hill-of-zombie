@@ -89,13 +89,24 @@ export function HUD({ gameRef }) {
 
   return (
     <div class="hud">
-      <div class="hud-row top">
-        <div class="badge"><div class="lbl">WAVE</div><div class="val" ref={refs.wave}>—</div></div>
-        <div class="badge"><div class="lbl">INFECTED</div><div class="val" ref={refs.zombies}>0</div></div>
-        <div class="badge"><div class="lbl">SCORE</div><div class="val" ref={refs.score}>0</div></div>
-        <div class="badge gold"><div class="lbl">CASH</div><div class="val" ref={refs.cash}>$0</div></div>
-        <div class="grow" />
-        <button class="mute-btn" ref={refs.muteBtn} onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'}>
+      <div class="hud-top">
+        <div class="hud-top-left">
+          <div class="stats-strip">
+            <span class="stat"><b ref={refs.wave}>—</b><i>WAVE</i></span>
+            <span class="stat"><b ref={refs.zombies}>0</b><i>LEFT</i></span>
+            <span class="stat"><b ref={refs.score}>0</b><i>SCORE</i></span>
+            <span class="stat gold"><b ref={refs.cash}>$0</b><i>CASH</i></span>
+          </div>
+          <div class="hud-bars">
+            <div class="bar health" title="Health">
+              <span class="bar-fill" ref={refs.health}></span>
+            </div>
+            <div class="bar hill" title="Signal Tower">
+              <span class="bar-fill" ref={refs.hill}></span>
+            </div>
+          </div>
+        </div>
+        <button class="icon-btn mute-btn" ref={refs.muteBtn} onClick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
           {muted ? '🔇' : '🔊'}
         </button>
       </div>
@@ -105,29 +116,19 @@ export function HUD({ gameRef }) {
         <div class="po-list" ref={refs.players}></div>
       </div>
 
-      <div class="hud-row bottom">
-        <div class="bars">
-          <div class="bar health">
-            <div class="bar-label">HEALTH</div>
-            <div class="bar-track"><div class="bar-fill" ref={refs.health}></div></div>
-          </div>
-          <div class="bar hill">
-            <div class="bar-label">SIGNAL TOWER</div>
-            <div class="bar-track"><div class="bar-fill" ref={refs.hill}></div></div>
-          </div>
+      <div class="hud-weapon">
+        <div class="wp-line">
+          <span class="wp-name" ref={refs.weaponName}>PISTOL</span>
+          <span class="wp-ammo" ref={refs.weaponAmmo}>∞</span>
         </div>
-        <div class="weapon-panel">
-          <div class="weapon-name" ref={refs.weaponName}>PISTOL</div>
-          <div class="weapon-ammo" ref={refs.weaponAmmo}>∞</div>
-          <div class="weapon-slots" ref={refs.slots}>
-            {WEAPON_ORDER.map((k, i) => (
-              <div
-                class={`slot ${k === 'pistol' ? 'owned active' : ''}`}
-                key={k}
-                onClick={() => { const g = gameRef.current; if (g) g.input.weaponEdge = k; }}
-              >{i + 1}</div>
-            ))}
-          </div>
+        <div class="wp-slots" ref={refs.slots}>
+          {WEAPON_ORDER.map((k, i) => (
+            <div
+              class={`slot ${k === 'pistol' ? 'owned active' : ''}`}
+              key={k}
+              onClick={() => { const g = gameRef.current; if (g) g.input.weaponEdge = k; }}
+            >{i + 1}</div>
+          ))}
         </div>
       </div>
     </div>

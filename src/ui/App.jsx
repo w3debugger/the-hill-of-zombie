@@ -37,6 +37,9 @@ export function App() {
 
   const [gameState, setGameState] = useState('idle'); // 'playing'|'shop'|'paused'|'gameover'|'victory'
   const [paused, setPaused] = useState(false);
+  // When true, the menu card hides so the user can browse the spectate canvas
+  // behind it. A floating PLAY button is shown to bring the menu back.
+  const [menuMinimized, setMenuMinimized] = useState(false);
   const [radio, setRadio] = useState([]);
   const [banner, setBanner] = useState(null);
   const [hurtPulse, setHurtPulse] = useState(0);
@@ -149,9 +152,10 @@ export function App() {
     if (netRef.current) netRef.current.send(C2S.LOBBY_READY, { ready });
   };
 
-  // Initialize GameClient when entering 'game' screen
+  // Initialize GameClient when entering 'game' screen, or a preview client on
+  // the menu so the user can browse the arena behind the menu card.
   useEffect(() => {
-    if (screen !== 'game') return;
+    if (screen !== 'game' && screen !== 'menu') return;
     let cancelled = false;
     const init = async () => {
       // Wait one frame so the canvas is mounted
@@ -179,8 +183,9 @@ export function App() {
         onEsc: () => setPaused(p => !p),
       });
       gameRef.current = client;
-      // Wave banner for wave 1 (solo + mp)
-      if (mode === 'solo') {
+      if (screen === 'menu') {
+        client.startPreview();
+      } else if (mode === 'solo') {
         client.startSolo({ name: profile.name, color: profile.color });
       } else if (mode === 'mp' && netRef.current && lobby) {
         client.startMultiplayer(netRef.current, lobby.yourId);
@@ -207,6 +212,7 @@ export function App() {
     setRadio([]);
     setBanner(null);
     setMode(null);
+    setMenuMinimized(false);
     setScreen('menu');
   };
 
@@ -227,15 +233,26 @@ export function App() {
     <>
       {screen === 'intro' && <Intro onDone={finishIntro} />}
       {screen === 'menu' && (
-        <MainMenu
-          profile={profile}
-          setProfile={setProfile}
-          onSolo={startSolo}
-          onHost={hostMP}
-          onJoin={joinMP}
-          error={error}
-          clearError={() => setError(null)}
-        />
+        <>
+          <canvas ref={canvasRef} class="game-canvas" />
+          {!menuMinimized ? (
+            <MainMenu
+              profile={profile}
+              setProfile={setProfile}
+              onSolo={startSolo}
+              onHost={hostMP}
+              onJoin={joinMP}
+              onMinimize={() => setMenuMinimized(true)}
+              error={error}
+              clearError={() => setError(null)}
+            />
+          ) : (
+            <button class="floating-play" onClick={() => setMenuMinimized(false)}>
+              <span class="fp-label">PLAY</span>
+              <span class="fp-sub">Hilltop Echo · stand to</span>
+            </button>
+          )}
+        </>
       )}
       {screen === 'lobby' && lobby && (
         <Lobby

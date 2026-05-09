@@ -65,6 +65,20 @@ export class GameClient {
     this._begin();
   }
 
+  // Spectate / preview: builds a world with no player and never starts a wave,
+  // so the menu canvas shows the empty hill while the user browses. The world
+  // sits in 'lobby' state — World.step is a no-op there, so nothing spawns and
+  // nothing decays. Renderer enters orbit-cam mode for ambient camera motion.
+  startPreview() {
+    this.previewMode = true;
+    this.localWorld = new World();
+    this.localPlayerId = null;
+    this.renderer.setLocalPlayer(null);
+    this.renderer.setPreviewMode(true);
+    this.world = this.localWorld.live();
+    this._begin();
+  }
+
   // Multiplayer (called after lobby Start)
   startMultiplayer(net, yourId) {
     this.net = net;
@@ -76,11 +90,17 @@ export class GameClient {
   }
 
   _begin() {
-    this.audio.ensure();
-    this.audio.startAmbience();
+    // Skip audio in preview — the menu shouldn't hijack the page with ambience
+    // before the player actually opts into the game. Audio unlocks on the
+    // first solo/MP start.
+    if (!this.previewMode) {
+      this.audio.ensure();
+      this.audio.startAmbience();
+    }
     this.running = true;
     this.lastT = performance.now();
-    this.canvas.style.cursor = 'none';
+    // Keep the cursor visible during preview — there's no aim, just the menu.
+    this.canvas.style.cursor = this.previewMode ? '' : 'none';
     requestAnimationFrame(this._loop);
   }
 
@@ -90,6 +110,7 @@ export class GameClient {
     this.input.destroy();
     if (this.net) this.net.close();
     this.canvas.style.cursor = '';
+    if (this.previewMode) this.renderer.setPreviewMode(false);
   }
   pause() { this.paused = true; }
   resume() { this.paused = false; this.lastT = performance.now(); }
@@ -132,7 +153,7 @@ export class GameClient {
       this._processStateTransitions();
     }
 
-    if (this.input.consumeEsc()) this.opts.onEsc?.();
+    if (this.input.consumeEsc() && !this.previewMode) this.opts.onEsc?.();
 
     // Heartbeat intensity rides local player HP — silent above 60%, ramps to
     // full panic at 0%. Killed players get no heartbeat (the silence sells the
