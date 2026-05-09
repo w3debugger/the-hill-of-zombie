@@ -56,7 +56,6 @@ button { font-family: inherit; }
   display: grid;
   place-items: center;
   z-index: 50;
-  backdrop-filter: blur(4px);
 }
 .overlay.solid {
   background: rgba(0, 0, 0, 0.86);
@@ -670,7 +669,6 @@ button { font-family: inherit; }
   background: rgba(10, 13, 16, 0.7);
   border: 1px solid rgba(255,255,255,0.08);
   border-left: 2px solid var(--accent);
-  backdrop-filter: blur(6px);
   pointer-events: auto;
 }
 .stats-strip .stat {
@@ -707,7 +705,6 @@ button { font-family: inherit; }
   font-size: 16px;
   width: 36px; height: 36px;
   cursor: pointer;
-  backdrop-filter: blur(6px);
   display: grid;
   place-items: center;
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -763,7 +760,6 @@ button { font-family: inherit; }
   border: 1px solid rgba(255,255,255,0.08);
   border-right: 2px solid var(--accent);
   padding: 5px 12px;
-  backdrop-filter: blur(6px);
 }
 .wp-name {
   font-family: var(--font-ui);
@@ -797,7 +793,6 @@ button { font-family: inherit; }
   pointer-events: auto;
   cursor: pointer;
   user-select: none;
-  backdrop-filter: blur(6px);
 }
 .slot.owned { opacity: 1; color: var(--ink); }
 .slot.active { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -924,7 +919,6 @@ button { font-family: inherit; }
   font-size: 14px;
   color: var(--ink);
   animation: radioIn 0.35s ease, radioOut 0.5s ease 6.5s forwards;
-  backdrop-filter: blur(4px);
 }
 .radio-from {
   color: var(--gold);

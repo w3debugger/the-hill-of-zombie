@@ -33,31 +33,11 @@ export class Renderer {
     this._tmpScreen = { x: 0, y: 0 }; // scratch for worldToScreen
     this.cinematic = null;          // see triggerKillCinematic
     this.bloodSpreadAccum = 0;      // schedules blood-spread bursts during cinematic
-    this.fog = [];                  // drifting fog wisps in world space
-    this.fogSpawnAccum = 0;
-    this.lightning = null;          // { age, dur, intensity } when a flash is active
-    this.lightningCooldown = 6 + Math.random() * 12;
-    this.pendingThunder = false;    // raised when lightning starts; client clears
-    this._fogSprite = null;
-    this._buildFogSprite();
+    this.pendingThunder = false;    // kept for API stability; never raised now
     this.buildGround();
     this._buildGlowSprites();
     this.resize();
     window.addEventListener('resize', () => this.resize());
-  }
-
-  _buildFogSprite() {
-    // Soft radial alpha disc — drawn many times per frame for cheap fog wisps.
-    const c = document.createElement('canvas');
-    const s = 256; c.width = c.height = s;
-    const cx = c.getContext('2d');
-    const g = cx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-    g.addColorStop(0, 'rgba(170, 175, 180, 0.55)');
-    g.addColorStop(0.6, 'rgba(120, 125, 130, 0.18)');
-    g.addColorStop(1, 'rgba(80, 85, 90, 0)');
-    cx.fillStyle = g;
-    cx.fillRect(0, 0, s, s);
-    this._fogSprite = c;
   }
 
   consumeThunder() {
@@ -210,12 +190,12 @@ export class Renderer {
     };
     // Initial impact pop: a heavy spray + extra decals around the kill site
     this.bigBlood(x, y);
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 6; i++) {
       const a = Math.random() * TAU;
       const d = rand(2, 22);
       this.decals.push({ x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, r: rand(4, 9), alpha: 0.7, age: 0 });
     }
-    if (this.decals.length > 260) this.decals.splice(0, this.decals.length - 260);
+    if (this.decals.length > 120) this.decals.splice(0, this.decals.length - 120);
     this.addShake(0.45);
   }
   isCinematicActive() { return !!this.cinematic; }
@@ -230,18 +210,18 @@ export class Renderer {
 
   // ----- Effects API (called by client in response to events) -----
   bloodSplatter(x, y, dirAngle, intensity = 1) {
-    const n = Math.floor(6 + intensity * 8);
+    const n = Math.floor(3 + intensity * 4);
     for (let i = 0; i < n; i++) {
       const a = dirAngle + rand(-0.9, 0.9);
       const s = rand(80, 220) * intensity;
       this.particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s, life: rand(0.25, 0.55), max: 0.55, size: rand(2, 5), color: '#a01515', type: 'blood' });
     }
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       const a = rand(0, TAU);
       const d = rand(2, 18) * intensity;
       this.decals.push({ x: x + Math.cos(a)*d, y: y + Math.sin(a)*d, r: rand(3, 7) * intensity, alpha: 0.55, age: 0 });
     }
-    if (this.decals.length > 220) this.decals.splice(0, this.decals.length - 220);
+    if (this.decals.length > 120) this.decals.splice(0, this.decals.length - 120);
   }
   muzzleEffect(x, y, angle, color) {
     for (let i = 0; i < 4; i++) {
@@ -258,16 +238,11 @@ export class Renderer {
     this.particles.push({ x: x - Math.cos(angle) * 6, y: y - Math.sin(angle) * 6, vx: Math.cos(ca) * rand(60, 120), vy: Math.sin(ca) * rand(60, 120), life: 0.6, max: 0.6, size: 1.6, color: '#d4a060', type: 'casing' });
   }
   bigBlood(x, y) {
-    for (let i = 0; i < 28; i++) {
+    for (let i = 0; i < 12; i++) {
       const a = rand(0, TAU);
       this.particles.push({ x, y, vx: Math.cos(a)*rand(120, 360), vy: Math.sin(a)*rand(120, 360), life: rand(0.4, 1.0), max: 1.0, size: rand(3, 6), color: '#a01515', type: 'blood' });
     }
-    // darker arterial droplets that linger
-    for (let i = 0; i < 10; i++) {
-      const a = rand(0, TAU);
-      this.particles.push({ x, y, vx: Math.cos(a)*rand(40, 140), vy: Math.sin(a)*rand(40, 140), life: rand(0.7, 1.2), max: 1.2, size: rand(2, 4), color: '#5a0808', type: 'blood' });
-    }
-    this.bloodSplatter(x, y, rand(0, TAU), 1.6);
+    this.bloodSplatter(x, y, rand(0, TAU), 1.2);
   }
   spawnDrool(x, y, kind) {
     const c = kind === 'green' ? '#5a7a14' : '#5a0808';
@@ -356,7 +331,7 @@ export class Renderer {
     // the splatter visibly grows over the slow-mo window.
     if (this.cinematic && this.cinematic.age > 0.22 && this.cinematic.age < 1.40) {
       this.bloodSpreadAccum += dt;
-      const interval = 0.06;
+      const interval = 0.16;
       while (this.bloodSpreadAccum >= interval) {
         this.bloodSpreadAccum -= interval;
         const c = this.cinematic;
@@ -369,11 +344,11 @@ export class Renderer {
           life: rand(0.4, 0.7), max: 0.7, size: rand(2, 4),
           color: '#a01515', type: 'blood',
         });
-        if (Math.random() < 0.6) {
+        if (Math.random() < 0.4) {
           this.decals.push({ x: c.x + Math.cos(a) * d, y: c.y + Math.sin(a) * d, r: rand(2, 5), alpha: 0.55, age: 0 });
         }
       }
-      if (this.decals.length > 260) this.decals.splice(0, this.decals.length - 260);
+      if (this.decals.length > 120) this.decals.splice(0, this.decals.length - 120);
     } else {
       this.bloodSpreadAccum = 0;
     }
@@ -382,62 +357,6 @@ export class Renderer {
     for (const d of this.decals) d.age += dt;
     // Prune sprite cache every 30 frames (~0.5s)
     if ((this.timeMs | 0) % 500 < 17) this._pruneZombieSprites(world);
-
-    this._tickFog(dt);
-    this._tickLightning(dt);
-  }
-
-  _tickFog(dt) {
-    // Spawn area is in world units. With baseZoom<1 the visible region is
-    // wider than the screen, so widen the spawn area to match.
-    const worldW = this.viewW / this.baseZoom;
-    const worldH = this.viewH / this.baseZoom;
-    // Halve fog density on small/touch viewports — each wisp is a full sprite
-    // blit with 'screen' compositing, which dominates mobile fill cost.
-    const target = (this.dpr < 2 && this.viewW <= 900) ? 14 : 28;
-    while (this.fog.length < target) {
-      const ox = (Math.random() - 0.5) * (worldW + 600);
-      const oy = (Math.random() - 0.5) * (worldH + 400);
-      this.fog.push({
-        x: this.cam.x + ox,
-        y: this.cam.y + oy,
-        vx: rand(-12, 18),
-        vy: rand(-6, 6),
-        size: rand(180, 360),
-        alpha: rand(0.18, 0.42),
-        rot: rand(0, TAU),
-        rotV: rand(-0.05, 0.05),
-        life: rand(8, 16),
-      });
-    }
-    for (let i = this.fog.length - 1; i >= 0; i--) {
-      const f = this.fog[i];
-      f.x += f.vx * dt; f.y += f.vy * dt;
-      f.rot += f.rotV * dt;
-      f.life -= dt;
-      // Drop wisps that wandered far off-camera or expired.
-      const dx = f.x - this.cam.x, dy = f.y - this.cam.y;
-      if (f.life <= 0 || Math.abs(dx) > worldW * 0.9 || Math.abs(dy) > worldH * 0.9) {
-        this.fog.splice(i, 1);
-      }
-    }
-  }
-
-  _tickLightning(dt) {
-    if (this.lightning) {
-      this.lightning.age += dt;
-      if (this.lightning.age >= this.lightning.dur) this.lightning = null;
-    } else {
-      this.lightningCooldown -= dt;
-      if (this.lightningCooldown <= 0) {
-        // Most "rolls" produce no flash; the rare ones land hard.
-        if (Math.random() < 0.55) {
-          this.lightning = { age: 0, dur: rand(0.45, 0.85), intensity: rand(0.45, 0.95) };
-          this.pendingThunder = true;
-        }
-        this.lightningCooldown = 12 + Math.random() * 22;
-      }
-    }
   }
 
   // ----- Draw -----
@@ -466,83 +385,13 @@ export class Renderer {
     this.drawPlayers(world);
     this.drawBullets(world);
     this.drawParticles();
-    this.drawFog();
     this.drawMuzzleGlow(world);
 
     if (zoomed) ctx.restore();
 
     this.drawLighting(world);
-    this.drawLightning();
-    this.drawHpVignette(world);
     this.drawCinematicOverlay();
     this.drawCrosshair(world, mouse);
-  }
-
-  drawFog() {
-    const ctx = this.ctx;
-    const prevAlpha = ctx.globalAlpha;
-    const prevComp = ctx.globalCompositeOperation;
-    // 'screen' lifts dark areas — wisps look gauzy rather than gray slabs.
-    ctx.globalCompositeOperation = 'screen';
-    for (let i = 0; i < this.fog.length; i++) {
-      const f = this.fog[i];
-      const sx = (f.x - this.cam.x) + this.viewW / 2 + this.cam.sx;
-      const sy = (f.y - this.cam.y) + this.viewH / 2 + this.cam.sy;
-      ctx.globalAlpha = f.alpha;
-      ctx.save();
-      ctx.translate(sx, sy);
-      ctx.rotate(f.rot);
-      ctx.drawImage(this._fogSprite, -f.size / 2, -f.size / 2, f.size, f.size);
-      ctx.restore();
-    }
-    ctx.globalCompositeOperation = prevComp;
-    ctx.globalAlpha = prevAlpha;
-  }
-
-  drawLightning() {
-    if (!this.lightning) return;
-    const ctx = this.ctx;
-    const c = this.lightning;
-    const t = c.age / c.dur;
-    // Sharp double-flash: bright impact, brief drop, second flicker, then darken.
-    let k;
-    if (t < 0.06)      k = t / 0.06;
-    else if (t < 0.18) k = 1 - (t - 0.06) / 0.12 * 0.7;
-    else if (t < 0.24) k = 0.3 + (t - 0.18) / 0.06 * 0.5;
-    else               k = Math.max(0, 0.8 - (t - 0.24) / 0.45);
-    const a = k * c.intensity;
-    ctx.fillStyle = `rgba(220, 230, 255, ${(a * 0.55).toFixed(3)})`;
-    ctx.fillRect(0, 0, this.viewW, this.viewH);
-    // Aftershadow — slight darken once the flash fades, makes the world feel
-    // unsettled instead of just bright-bright-done.
-    if (t > 0.55) {
-      const after = (t - 0.55) / 0.45;
-      ctx.fillStyle = `rgba(0, 0, 0, ${(after * 0.18 * c.intensity).toFixed(3)})`;
-      ctx.fillRect(0, 0, this.viewW, this.viewH);
-    }
-  }
-
-  drawHpVignette(world) {
-    if (!world) return;
-    const lp = world.players?.find?.(p => p.id === this.localPlayerId) || world.players?.[0];
-    if (!lp || lp.dead) return;
-    const hpFrac = Math.max(0, Math.min(1, lp.hp / Math.max(1, lp.maxHp)));
-    if (hpFrac >= 0.6) return;
-    const ctx = this.ctx;
-    const danger = (0.6 - hpFrac) / 0.6; // 0..1
-    // Pulse with a fake heartbeat: 1.4 Hz at low danger, 2.6 Hz at full panic.
-    const beatHz = 1.4 + danger * 1.2;
-    const pulse = 0.7 + 0.3 * Math.sin(this.timeMs * 0.001 * beatHz * TAU);
-    const grad = ctx.createRadialGradient(
-      this.viewW / 2, this.viewH / 2, this.viewH * 0.18,
-      this.viewW / 2, this.viewH / 2, this.viewH * 0.78
-    );
-    const edgeA = (0.20 + 0.55 * danger) * pulse;
-    grad.addColorStop(0, 'rgba(120, 0, 0, 0)');
-    grad.addColorStop(0.6, `rgba(140, 8, 8, ${(edgeA * 0.35).toFixed(3)})`);
-    grad.addColorStop(1, `rgba(160, 12, 12, ${edgeA.toFixed(3)})`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, this.viewW, this.viewH);
   }
 
   drawGround() {
@@ -1135,42 +984,6 @@ export class Renderer {
       ctx.fillRect(sx - bw / 2 + 1, sy - z.r - 11, (bw - 2) * ratio, 2);
     }
 
-    // eye glow halo (cached glow sprite, drawn at world-space eye position)
-    if (!flash) {
-      const flicker = 0.55 + 0.45 * Math.sin(this.timeMs * 0.015 + z.seed * 11);
-      // Twitch: brief intense flare every few seconds (matches eye twitch phase).
-      const twitch = Math.sin(this.timeMs * 0.0009 + z.seed * 3.7) > 0.92 ? 1.45 : 1;
-      // Proximity aura: zombies near the local player glow much more menacingly.
-      let proxBoost = 1;
-      if (this.localPlayerPos) {
-        const dx = z.x - this.localPlayerPos.x;
-        const dy = z.y - this.localPlayerPos.y;
-        const d = Math.hypot(dx, dy);
-        const NEAR = 200, FAR = 520;
-        if (d < FAR) {
-          const k = Math.max(0, Math.min(1, (FAR - d) / (FAR - NEAR)));
-          proxBoost = 1 + k * 1.4;
-        }
-      }
-      const eyeFwd = r * 0.55 + r * 0.5 * 0.18;
-      const exwx = z.x + Math.cos(z.angle) * eyeFwd;
-      const exwy = z.y + Math.sin(z.angle) * eyeFwd;
-      const esx = (exwx - this.cam.x) + this.viewW / 2 + this.cam.sx;
-      const esy = (exwy - this.cam.y) + this.viewH / 2 + this.cam.sy;
-      const haloR = r * 1.05 * flicker * twitch * proxBoost;
-      const sprite = z.type === 'spitter' ? this.glowSprites.green : this.glowSprites.red;
-      const a = ctx.globalAlpha;
-      ctx.globalAlpha = Math.min(0.95, 0.42 * flicker * proxBoost);
-      ctx.drawImage(sprite, esx - haloR, esy - haloR, haloR * 2, haloR * 2);
-      // Outer body aura when zombie is close — a wider faint red wash around the corpse silhouette
-      if (proxBoost > 1.4) {
-        const auraR = r * 2.4 * proxBoost;
-        const intensity = (proxBoost - 1) / 1.4;
-        ctx.globalAlpha = 0.22 * intensity;
-        ctx.drawImage(sprite, sx - auraR, sy - auraR, auraR * 2, auraR * 2);
-      }
-      ctx.globalAlpha = a;
-    }
   }
 
   _drawZombieArms(cx, z) {
@@ -1438,16 +1251,6 @@ export class Renderer {
     ctx.fillRect(0, 0, this.viewW, barH);
     ctx.fillRect(0, this.viewH - barH, this.viewW, barH);
 
-    // Edge vignette (heavier than the normal one)
-    const grad = ctx.createRadialGradient(
-      this.viewW / 2, this.viewH / 2, this.viewH * 0.18,
-      this.viewW / 2, this.viewH / 2, this.viewH * 0.7
-    );
-    grad.addColorStop(0, 'rgba(0,0,0,0)');
-    grad.addColorStop(1, `rgba(8,0,0,${0.55 * blend})`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, this.viewW, this.viewH);
-
     // Brief impact white-flash at the start of the hold phase
     if (c.age >= 0.14 && c.age < 0.28) {
       const t = (c.age - 0.14) / 0.14;
@@ -1455,11 +1258,6 @@ export class Renderer {
       ctx.fillStyle = `rgba(255, 230, 220, ${a.toFixed(3)})`;
       ctx.fillRect(0, 0, this.viewW, this.viewH);
     }
-
-    // Subtle red bloom that fades through the cinematic
-    const bloomA = 0.18 * blend * (0.6 + 0.4 * Math.sin(c.age * 9));
-    ctx.fillStyle = `rgba(120, 8, 8, ${bloomA.toFixed(3)})`;
-    ctx.fillRect(0, 0, this.viewW, this.viewH);
 
     // "KILL" stamp upper-right during hold
     if (c.age > 0.18 && c.age < 0.85) {
