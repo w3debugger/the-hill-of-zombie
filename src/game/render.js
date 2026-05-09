@@ -29,10 +29,37 @@ export class Renderer {
     this._tmpScreen = { x: 0, y: 0 }; // scratch for worldToScreen
     this.cinematic = null;          // see triggerKillCinematic
     this.bloodSpreadAccum = 0;      // schedules blood-spread bursts during cinematic
+    this.fog = [];                  // drifting fog wisps in world space
+    this.fogSpawnAccum = 0;
+    this.lightning = null;          // { age, dur, intensity } when a flash is active
+    this.lightningCooldown = 6 + Math.random() * 12;
+    this.pendingThunder = false;    // raised when lightning starts; client clears
+    this._fogSprite = null;
+    this._buildFogSprite();
     this.buildGround();
     this._buildGlowSprites();
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  _buildFogSprite() {
+    // Soft radial alpha disc — drawn many times per frame for cheap fog wisps.
+    const c = document.createElement('canvas');
+    const s = 256; c.width = c.height = s;
+    const cx = c.getContext('2d');
+    const g = cx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    g.addColorStop(0, 'rgba(170, 175, 180, 0.55)');
+    g.addColorStop(0.6, 'rgba(120, 125, 130, 0.18)');
+    g.addColorStop(1, 'rgba(80, 85, 90, 0)');
+    cx.fillStyle = g;
+    cx.fillRect(0, 0, s, s);
+    this._fogSprite = c;
+  }
+
+  consumeThunder() {
+    const v = this.pendingThunder;
+    this.pendingThunder = false;
+    return v;
   }
   resize() {
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -322,6 +349,58 @@ export class Renderer {
     for (const d of this.decals) d.age += dt;
     // Prune sprite cache every 30 frames (~0.5s)
     if ((this.timeMs | 0) % 500 < 17) this._pruneZombieSprites(world);
+
+    this._tickFog(dt);
+    this._tickLightning(dt);
+  }
+
+  _tickFog(dt) {
+    // Keep ~26 wisps in the camera's vicinity. Spawn new ones on the upwind
+    // edge so they drift across view.
+    const target = 28;
+    while (this.fog.length < target) {
+      const ox = (Math.random() - 0.5) * (this.viewW + 600);
+      const oy = (Math.random() - 0.5) * (this.viewH + 400);
+      this.fog.push({
+        x: this.cam.x + ox,
+        y: this.cam.y + oy,
+        vx: rand(-12, 18),
+        vy: rand(-6, 6),
+        size: rand(180, 360),
+        alpha: rand(0.18, 0.42),
+        rot: rand(0, TAU),
+        rotV: rand(-0.05, 0.05),
+        life: rand(8, 16),
+      });
+    }
+    for (let i = this.fog.length - 1; i >= 0; i--) {
+      const f = this.fog[i];
+      f.x += f.vx * dt; f.y += f.vy * dt;
+      f.rot += f.rotV * dt;
+      f.life -= dt;
+      // Drop wisps that wandered far off-camera or expired.
+      const dx = f.x - this.cam.x, dy = f.y - this.cam.y;
+      if (f.life <= 0 || Math.abs(dx) > this.viewW * 0.9 || Math.abs(dy) > this.viewH * 0.9) {
+        this.fog.splice(i, 1);
+      }
+    }
+  }
+
+  _tickLightning(dt) {
+    if (this.lightning) {
+      this.lightning.age += dt;
+      if (this.lightning.age >= this.lightning.dur) this.lightning = null;
+    } else {
+      this.lightningCooldown -= dt;
+      if (this.lightningCooldown <= 0) {
+        // Most "rolls" produce no flash; the rare ones land hard.
+        if (Math.random() < 0.55) {
+          this.lightning = { age: 0, dur: rand(0.45, 0.85), intensity: rand(0.45, 0.95) };
+          this.pendingThunder = true;
+        }
+        this.lightningCooldown = 12 + Math.random() * 22;
+      }
+    }
   }
 
   // ----- Draw -----
@@ -350,13 +429,83 @@ export class Renderer {
     this.drawPlayers(world);
     this.drawBullets(world);
     this.drawParticles();
+    this.drawFog();
     this.drawMuzzleGlow(world);
 
     if (zoomed) ctx.restore();
 
     this.drawLighting(world);
+    this.drawLightning();
+    this.drawHpVignette(world);
     this.drawCinematicOverlay();
     this.drawCrosshair(world, mouse);
+  }
+
+  drawFog() {
+    const ctx = this.ctx;
+    const prevAlpha = ctx.globalAlpha;
+    const prevComp = ctx.globalCompositeOperation;
+    // 'screen' lifts dark areas — wisps look gauzy rather than gray slabs.
+    ctx.globalCompositeOperation = 'screen';
+    for (let i = 0; i < this.fog.length; i++) {
+      const f = this.fog[i];
+      const sx = (f.x - this.cam.x) + this.viewW / 2 + this.cam.sx;
+      const sy = (f.y - this.cam.y) + this.viewH / 2 + this.cam.sy;
+      ctx.globalAlpha = f.alpha;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(f.rot);
+      ctx.drawImage(this._fogSprite, -f.size / 2, -f.size / 2, f.size, f.size);
+      ctx.restore();
+    }
+    ctx.globalCompositeOperation = prevComp;
+    ctx.globalAlpha = prevAlpha;
+  }
+
+  drawLightning() {
+    if (!this.lightning) return;
+    const ctx = this.ctx;
+    const c = this.lightning;
+    const t = c.age / c.dur;
+    // Sharp double-flash: bright impact, brief drop, second flicker, then darken.
+    let k;
+    if (t < 0.06)      k = t / 0.06;
+    else if (t < 0.18) k = 1 - (t - 0.06) / 0.12 * 0.7;
+    else if (t < 0.24) k = 0.3 + (t - 0.18) / 0.06 * 0.5;
+    else               k = Math.max(0, 0.8 - (t - 0.24) / 0.45);
+    const a = k * c.intensity;
+    ctx.fillStyle = `rgba(220, 230, 255, ${(a * 0.55).toFixed(3)})`;
+    ctx.fillRect(0, 0, this.viewW, this.viewH);
+    // Aftershadow — slight darken once the flash fades, makes the world feel
+    // unsettled instead of just bright-bright-done.
+    if (t > 0.55) {
+      const after = (t - 0.55) / 0.45;
+      ctx.fillStyle = `rgba(0, 0, 0, ${(after * 0.18 * c.intensity).toFixed(3)})`;
+      ctx.fillRect(0, 0, this.viewW, this.viewH);
+    }
+  }
+
+  drawHpVignette(world) {
+    if (!world) return;
+    const lp = world.players?.find?.(p => p.id === this.localPlayerId) || world.players?.[0];
+    if (!lp || lp.dead) return;
+    const hpFrac = Math.max(0, Math.min(1, lp.hp / Math.max(1, lp.maxHp)));
+    if (hpFrac >= 0.6) return;
+    const ctx = this.ctx;
+    const danger = (0.6 - hpFrac) / 0.6; // 0..1
+    // Pulse with a fake heartbeat: 1.4 Hz at low danger, 2.6 Hz at full panic.
+    const beatHz = 1.4 + danger * 1.2;
+    const pulse = 0.7 + 0.3 * Math.sin(this.timeMs * 0.001 * beatHz * TAU);
+    const grad = ctx.createRadialGradient(
+      this.viewW / 2, this.viewH / 2, this.viewH * 0.18,
+      this.viewW / 2, this.viewH / 2, this.viewH * 0.78
+    );
+    const edgeA = (0.20 + 0.55 * danger) * pulse;
+    grad.addColorStop(0, 'rgba(120, 0, 0, 0)');
+    grad.addColorStop(0.6, `rgba(140, 8, 8, ${(edgeA * 0.35).toFixed(3)})`);
+    grad.addColorStop(1, `rgba(160, 12, 12, ${edgeA.toFixed(3)})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, this.viewW, this.viewH);
   }
 
   drawGround() {

@@ -2,12 +2,23 @@
 // Runs the World per room at 30Hz, broadcasts snapshots at 20Hz.
 
 import http from 'http';
+import os from 'os';
 import { WebSocketServer } from 'ws';
 import { World } from '../src/game/world.js';
 import { C2S, S2C } from '../src/net/protocol.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 const log = (...args) => console.log('[hoz]', ...args);
+
+function lanIPs() {
+  const out = [];
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const it of list || []) {
+      if (it.family === 'IPv4' && !it.internal) out.push(it.address);
+    }
+  }
+  return out;
+}
 
 const httpServer = http.createServer((req, res) => {
   if (req.url === '/health' || req.url === '/') {
@@ -18,8 +29,14 @@ const httpServer = http.createServer((req, res) => {
   res.writeHead(404);
   res.end();
 });
-const wss = new WebSocketServer({ server: httpServer });
-httpServer.listen(PORT, () => log(`HTTP+WS server listening on :${PORT}`));
+// perMessageDeflate: false — our snapshots/inputs are tiny JSON; the ~5-15 ms
+// CPU cost of zlib per message dwarfs the bytes saved on a LAN.
+const wss = new WebSocketServer({ server: httpServer, perMessageDeflate: false });
+httpServer.listen(PORT, () => {
+  log(`HTTP+WS server listening on :${PORT}`);
+  const ips = lanIPs();
+  if (ips.length) log(`LAN play: other players open http://${ips[0]}:5173 on the same WiFi`);
+});
 
 const rooms = new Map();   // code -> Room
 const clients = new Map(); // ws -> Client
@@ -47,11 +64,12 @@ class Room {
     this.world = null;
     this.tickHandle = null;
     this.snapshotHandle = null;
-    // 60Hz tick = ~16ms input-sample latency (was 33ms at 30Hz).
-    // 30Hz snapshot = ~33ms snapshot interval, fits cleanly under the
-    // client's 100ms interp delay with a 3-snapshot jitter buffer.
+    // 60Hz tick = ~16ms input-sample latency.
+    // 60Hz snapshot — bandwidth is a non-issue on LAN; matching tick rate
+    // halves time-between-authoritative-corrections so remote players move
+    // smoothly without a long interp delay.
     this.tickRate = 60;
-    this.snapshotRate = 30;
+    this.snapshotRate = 60;
     this.lobbyReady = new Map();
     this.lastTick = 0;
   }
@@ -143,6 +161,11 @@ function nanoid(len = 10) {
 }
 
 wss.on('connection', (ws, req) => {
+  // Disable Nagle on the underlying TCP socket. Default Nagle batches small
+  // writes for up to ~40 ms waiting for an ack — that's an extra 40 ms of
+  // input lag on every keystroke for zero benefit on a LAN where bandwidth
+  // isn't the bottleneck. We want each input/snapshot on the wire NOW.
+  try { req.socket.setNoDelay(true); } catch (e) {}
   const c = new Client(ws);
   clients.set(ws, c);
   log(`client ${c.id} connected (${req.socket.remoteAddress})`);

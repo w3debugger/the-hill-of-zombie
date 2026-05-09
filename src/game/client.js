@@ -1,13 +1,13 @@
 // GameClient: glues world + renderer + audio + input together.
 // Supports solo (runs World locally) or multiplayer (renders snapshots from server).
 //
-// Multiplayer perf notes:
-//  - Server snapshots are lean (no bullets, no immutable fields). The client
-//    pieces together a "live"-shaped world from snapshots + cached static info.
-//  - Snapshots are buffered and rendered ~INTERP_DELAY_MS in the past so 20 Hz
-//    network ticks render as smooth 60 fps motion via lerp between two frames.
-//  - The local player runs a lightweight prediction step each frame so input
-//    feels instant; we reconcile against authoritative server position.
+// Multiplayer notes (LAN-tuned — no interp delay, no client prediction):
+//  - We render the latest server snapshot directly. On WiFi/LAN the round trip
+//    is low enough (1–5 ms) that input feels snappy without prediction, and
+//    skipping the interp buffer means zero added latency.
+//  - Snapshots are lean (no bullets, no immutable fields). The client pieces
+//    together a "live"-shaped world from the latest snap + cached static info
+//    received earlier in 'player_joined' / 'zombie_spawned' / 'pickup_spawned'.
 //  - Bullets are cosmetic on the wire — clients spawn them from 'fire' events
 //    and simulate ballistics locally. Server stays authoritative for hits.
 
@@ -15,11 +15,10 @@ import { World } from './world.js';
 import { Renderer } from './render.js';
 import { AudioBus } from './audio.js';
 import { Input } from './input.js';
-import { RADIO_SCRIPT, WAVE_NAMES, WEAPONS, ZTYPES, TAU } from './data.js';
+import { RADIO_SCRIPT, WAVE_NAMES, WEAPONS, ZTYPES } from './data.js';
 import { C2S } from '../net/protocol.js';
 
-const INTERP_DELAY_MS = 100;
-const SNAP_BUFFER_MS = 600;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 let _cbId = 1;
 
@@ -39,17 +38,14 @@ export class GameClient {
     this.lastState = null;
     this.lastWaveAnnounced = 0;
     this.paused = false;
-    this.ambientGroanMs = 4000;
 
     // ----- Multiplayer-only state -----
-    this.snapBuf = [];                 // array of { ts, snap }
+    this.latestSnap = null;            // most recent server snapshot (raw)
     this.playerStatic = new Map();     // id -> { name, color, r }
     this.zombieStatic = new Map();     // id -> { type, r, maxHp, seed, wobble }
     this.pickupStatic = new Map();     // id -> { type, value }
     this.clientBullets = [];           // visual-only ballistic
     this.clientEnemyBullets = [];      // visual-only ballistic
-    this.localPredict = null;          // { x, y, vx, vy, angle } for local player
-    this.netStartTime = 0;
 
     // Cinematic kill-cam pacing
     this.localKillCount = 0;
@@ -74,7 +70,6 @@ export class GameClient {
     this.net = net;
     this.localPlayerId = yourId;
     this.renderer.setLocalPlayer(yourId);
-    this.netStartTime = performance.now();
     net.on('snapshot', (msg) => this._onSnapshot(msg));
     net.on('events', (msg) => this._handleEvents(msg.events));
     this._begin();
@@ -82,6 +77,7 @@ export class GameClient {
 
   _begin() {
     this.audio.ensure();
+    this.audio.startAmbience();
     this.running = true;
     this.lastT = performance.now();
     this.canvas.style.cursor = 'none';
@@ -90,6 +86,7 @@ export class GameClient {
 
   stop() {
     this.running = false;
+    this.audio.stopAmbience();
     this.input.destroy();
     if (this.net) this.net.close();
     this.canvas.style.cursor = '';
@@ -115,9 +112,7 @@ export class GameClient {
     // Compute aim angle from local player
     const aim = this._computeAim();
     const inputState = this.input.snapshot(aim);
-    inputState.buy = this.input.buyId;
     inputState.ready = !!this.input.readyHeld;
-    this.input.buyId = null;
 
     if (this.localWorld) {
       // ----- Solo: authoritative simulation runs locally -----
@@ -130,24 +125,33 @@ export class GameClient {
       this.world = this.localWorld.live();
       this._processStateTransitions();
     } else if (this.net) {
-      // ----- Multiplayer: ship input, predict, simulate cosmetic bullets, build assembled world -----
+      // ----- Multiplayer (LAN): ship input, render the latest snapshot -----
       this.net.send(C2S.INPUT, { input: inputState });
-      this._updateLocalPrediction(dt, inputState);
       this._updateClientBullets(dt);
-      this.world = this._buildAssembledWorld(performance.now());
+      this.world = this._buildWorldFromSnap(this.latestSnap);
       this._processStateTransitions();
     }
 
     if (this.input.consumeEsc()) this.opts.onEsc?.();
 
-    // Ambient groan
-    this.ambientGroanMs -= dt * 1000;
-    if (this.ambientGroanMs <= 0) {
-      this.ambientGroanMs = 2200 + Math.random() * 3500;
-      if (this.world && this.world.zombies && this.world.zombies.length > 0) this.audio.play('groan');
+    // Heartbeat intensity rides local player HP — silent above 60%, ramps to
+    // full panic at 0%. Killed players get no heartbeat (the silence sells the
+    // fact that you're down).
+    const lp = this.world?.players?.find?.(p => p.id === this.localPlayerId);
+    if (lp && !lp.dead) {
+      const hpFrac = clamp(lp.hp / Math.max(1, lp.maxHp), 0, 1);
+      const intensity = hpFrac < 0.6 ? (0.6 - hpFrac) / 0.6 : 0;
+      this.audio.setHeartbeatIntensity(intensity);
+    } else {
+      this.audio.setHeartbeatIntensity(0);
     }
 
     this.renderer.tick(dt, this.input.mouse, this.world);
+    if (this.renderer.consumeThunder()) {
+      // Slight delay so the audible boom trails the visual flash, like real
+      // distance lightning.
+      setTimeout(() => this.audio.play('thunder'), 220 + Math.random() * 320);
+    }
     this.renderer.draw(this.world, this.input.mouse);
     requestAnimationFrame(this._loop);
   };
@@ -201,15 +205,10 @@ export class GameClient {
     }
   }
 
-  // ---------- Multiplayer: snapshot buffer + interpolation ----------
+  // ---------- Multiplayer snapshot intake ----------
 
   _onSnapshot(snap) {
-    const ts = performance.now();
-    this.snapBuf.push({ ts, snap });
-    while (this.snapBuf.length > 0 && this.snapBuf[0].ts < ts - SNAP_BUFFER_MS) {
-      this.snapBuf.shift();
-    }
-    // Periodically prune static caches against the latest snapshot — cheap.
+    this.latestSnap = snap;
     this._pruneStatic(snap);
   }
 
@@ -226,145 +225,60 @@ export class GameClient {
     }
   }
 
-  _buildAssembledWorld(now) {
-    if (this.snapBuf.length === 0) return null;
-    const latest = this.snapBuf[this.snapBuf.length - 1].snap;
-    const renderTime = now - INTERP_DELAY_MS;
+  // Decode the latest snapshot into a "live"-shaped world the renderer can
+  // consume. Static fields (name/color, zombie type/seed, pickup type/value)
+  // come from the per-id caches populated by spawn events.
+  _buildWorldFromSnap(snap) {
+    if (!snap) return null;
 
-    let s0 = null, s1 = null;
-    for (let i = 0; i < this.snapBuf.length - 1; i++) {
-      if (this.snapBuf[i].ts <= renderTime && this.snapBuf[i + 1].ts >= renderTime) {
-        s0 = this.snapBuf[i]; s1 = this.snapBuf[i + 1]; break;
-      }
-    }
-    if (!s0) {
-      // Render time before our first snap, or after our latest — clamp.
-      const tail = this.snapBuf[this.snapBuf.length - 1];
-      const head = this.snapBuf[0];
-      if (renderTime < head.ts) { s0 = head; s1 = head; }
-      else { s0 = tail; s1 = tail; }
-    }
-    const span = s1.ts - s0.ts;
-    const t = span > 0 ? Math.max(0, Math.min(1, (renderTime - s0.ts) / span)) : 0;
-
-    const players = lerpEntities(s0.snap.players, s1.snap.players, t);
-    for (const p of players) {
+    const players = new Array(snap.players.length);
+    for (let i = 0; i < snap.players.length; i++) {
+      const p = { ...snap.players[i] };
       const st = this.playerStatic.get(p.id);
       if (st) { p.name = st.name; p.color = st.color; p.r = st.r; }
       else    { p.name = 'Player'; p.color = '#888'; p.r = 15; }
-    }
-    // Override the local player's transform with our prediction.
-    if (this.localPredict && this.localPlayerId != null) {
-      const me = players.find(pp => pp.id === this.localPlayerId);
-      if (me && !me.dead) {
-        me.x = this.localPredict.x;
-        me.y = this.localPredict.y;
-        me.vx = this.localPredict.vx;
-        me.vy = this.localPredict.vy;
-        me.angle = this.localPredict.angle;
-      }
+      players[i] = p;
     }
 
-    const zombies = lerpEntities(s0.snap.zombies, s1.snap.zombies, t);
-    const elapsed = (now - this.netStartTime) / 1000;
-    for (const z of zombies) {
+    // Wobble is a steady per-zombie animation phase. Server doesn't ship it,
+    // so we advance from the spawn-time seed using local wall-clock seconds.
+    const elapsed = performance.now() / 1000;
+    const zombies = new Array(snap.zombies.length);
+    for (let i = 0; i < snap.zombies.length; i++) {
+      const z = { ...snap.zombies[i] };
       const st = this.zombieStatic.get(z.id);
       if (st) {
         z.type = st.type; z.r = st.r; z.maxHp = st.maxHp; z.seed = st.seed;
-        // Server doesn't ship wobble; advance the per-zombie phase locally so
-        // the renderer sees a steadily-animating value identical to the server's.
         z.wobble = st.wobble + elapsed * 4;
       } else {
-        // Static info hasn't arrived yet — render with safe defaults for one
-        // frame; the spawn event lands on the next 'events' burst.
         z.type = 'walker'; z.r = 15; z.maxHp = z.hp; z.seed = z.id; z.wobble = 0;
       }
+      zombies[i] = z;
     }
 
-    const pickups = lerpEntities(s0.snap.pickups, s1.snap.pickups, t);
-    for (const it of pickups) {
+    const pickups = new Array(snap.pickups.length);
+    for (let i = 0; i < snap.pickups.length; i++) {
+      const it = { ...snap.pickups[i] };
       const st = this.pickupStatic.get(it.id);
       if (st) { it.type = st.type; it.value = st.value; }
       else    { it.type = 'cash'; it.value = 0; }
+      pickups[i] = it;
     }
 
     return {
-      tickN: latest.tickN,
-      state: latest.state,
-      cash: latest.cash,
-      hill: latest.hill,
-      waveNum: latest.waveNum,
-      inWave: latest.inWave,
-      remainingZombies: latest.remainingZombies,
+      tickN: snap.tickN,
+      state: snap.state,
+      cash: snap.cash,
+      hill: snap.hill,
+      waveNum: snap.waveNum,
+      inWave: snap.inWave,
+      remainingZombies: snap.remainingZombies,
       players,
       zombies,
       pickups,
       bullets: this.clientBullets,
       enemyBullets: this.clientEnemyBullets,
     };
-  }
-
-  // ---------- Local player prediction ----------
-  // Mirrors a stripped-down version of World.updatePlayers movement so that
-  // typing W/A/S/D moves the player on screen *immediately* instead of waiting
-  // for the next round-trip. Snaps to authoritative position when error grows.
-  _updateLocalPrediction(dt, inputState) {
-    if (!this.localPlayerId || this.snapBuf.length === 0) return;
-    const latestEntry = this.snapBuf[this.snapBuf.length - 1];
-    const latest = latestEntry.snap;
-    const serverMe = latest.players.find(p => p.id === this.localPlayerId);
-    if (!serverMe) { this.localPredict = null; return; }
-    if (serverMe.dead) {
-      this.localPredict = { x: serverMe.x, y: serverMe.y, vx: 0, vy: 0, angle: serverMe.angle || 0 };
-      return;
-    }
-    if (!this.localPredict) {
-      this.localPredict = { x: serverMe.x, y: serverMe.y, vx: serverMe.vx, vy: serverMe.vy, angle: serverMe.angle };
-    }
-
-    // Reconcile against the server's *projected current* position, not the
-    // raw snapshot. The latest snapshot describes where the server thought
-    // we were `snapAge` seconds ago — naively comparing predict against that
-    // stale value drags the predicted player backward every frame and makes
-    // movement feel sluggish. Project forward by snapAge using server velocity.
-    const snapAge = Math.min(0.5, Math.max(0, (performance.now() - latestEntry.ts) / 1000));
-    const sx = serverMe.x + (serverMe.vx || 0) * snapAge;
-    const sy = serverMe.y + (serverMe.vy || 0) * snapAge;
-    const errX = sx - this.localPredict.x;
-    const errY = sy - this.localPredict.y;
-    const errMag = Math.hypot(errX, errY);
-    const ix0 = clamp(inputState.mx || 0, -1, 1);
-    const iy0 = clamp(inputState.my || 0, -1, 1);
-    const inputMagPre = Math.hypot(ix0, iy0);
-    if (errMag > 120) {
-      // Hard snap on big drift (teleport / packet loss / dodge land).
-      this.localPredict.x = serverMe.x;
-      this.localPredict.y = serverMe.y;
-      this.localPredict.vx = serverMe.vx;
-      this.localPredict.vy = serverMe.vy;
-    } else if (errMag > 0.5) {
-      // Softer pull while actively moving — avoids fighting the player's input.
-      // Faster pull when idle so we settle to authoritative position.
-      const kRate = inputMagPre > 0 ? 2 : 8;
-      const k = Math.min(1, kRate * dt);
-      this.localPredict.x += errX * k;
-      this.localPredict.y += errY * k;
-    }
-
-    // Apply input locally (matches World.updatePlayers movement curve).
-    const ix = ix0;
-    const iy = iy0;
-    const inputMag = inputMagPre;
-    const baseSpeed = 230 * Math.pow(1.15, serverMe.upgrades?.speed || 0);
-    const sprinting = !!inputState.sprint && (serverMe.stamina || 0) > 0 && inputMag > 0;
-    const speed = baseSpeed * (sprinting ? 1.45 : 1);
-    const tvx = ix * speed, tvy = iy * speed;
-    const lerpK = 1 - Math.exp(-12 * dt);
-    this.localPredict.vx += (tvx - this.localPredict.vx) * lerpK;
-    this.localPredict.vy += (tvy - this.localPredict.vy) * lerpK;
-    this.localPredict.x += this.localPredict.vx * dt;
-    this.localPredict.y += this.localPredict.vy * dt;
-    this.localPredict.angle = (typeof inputState.ang === 'number') ? inputState.ang : this.localPredict.angle;
   }
 
   // ---------- Cosmetic bullet simulation ----------
@@ -537,52 +451,4 @@ export class GameClient {
 
 function weaponColor(key) {
   return ({ pistol:'#ffd96a', shotgun:'#ff8c4a', smg:'#5cc8ff', rifle:'#9affb6' })[key] || '#fff';
-}
-
-function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-
-// Lerp two snapshot entity arrays by id. Entities present only in one frame
-// pop in/out cleanly. Returns fresh objects safe to mutate (we attach static
-// fields on top during world assembly).
-function lerpEntities(a, b, t) {
-  if (t <= 0) {
-    const out = new Array(a.length);
-    for (let i = 0; i < a.length; i++) out[i] = { ...a[i] };
-    return out;
-  }
-  if (t >= 1) {
-    const out = new Array(b.length);
-    for (let i = 0; i < b.length; i++) out[i] = { ...b[i] };
-    return out;
-  }
-  const out = [];
-  const bMap = new Map();
-  for (let i = 0; i < b.length; i++) bMap.set(b[i].id, b[i]);
-  for (let i = 0; i < a.length; i++) {
-    const ea = a[i];
-    const eb = bMap.get(ea.id);
-    if (eb) {
-      out.push(lerpEntity(ea, eb, t));
-      bMap.delete(ea.id);
-    } else {
-      out.push({ ...ea });
-    }
-  }
-  for (const eb of bMap.values()) out.push({ ...eb });
-  return out;
-}
-
-function lerpEntity(a, b, t) {
-  const out = { ...b };
-  if (typeof a.x === 'number')   out.x  = a.x  + (b.x  - a.x ) * t;
-  if (typeof a.y === 'number')   out.y  = a.y  + (b.y  - a.y ) * t;
-  if (typeof a.vx === 'number')  out.vx = a.vx + (b.vx - a.vx) * t;
-  if (typeof a.vy === 'number')  out.vy = a.vy + (b.vy - a.vy) * t;
-  if (typeof a.hp === 'number')  out.hp = a.hp + (b.hp - a.hp) * t;
-  if (typeof a.angle === 'number' && typeof b.angle === 'number') {
-    let da = b.angle - a.angle;
-    if (da > Math.PI) da -= TAU; else if (da < -Math.PI) da += TAU;
-    out.angle = a.angle + da * t;
-  }
-  return out;
 }

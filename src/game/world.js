@@ -6,6 +6,41 @@ import {
   WEAPONS, WEAPON_ORDER, ZTYPES, SHOP_ITEMS, shopPrice, PLAYER_COLORS,
 } from './data.js';
 
+// Shared player kinematics. Called by the authoritative server tick AND by the
+// client's prediction/replay path so both produce identical motion for the
+// same (dt, input) — no drift, no reconciliation fighting the player's input.
+//
+// Mutates p in place. Only touches movement/orientation; combat-side effects
+// (dodge initiation, fire, reload, stamina drain, dodge cooldowns) stay in
+// updatePlayers because they generate events and we don't replay events.
+export function applyPlayerMovement(p, input, dt) {
+  if (p.dead) return;
+  const ix = clamp(input.mx || 0, -1, 1);
+  const iy = clamp(input.my || 0, -1, 1);
+  const inputMag = Math.hypot(ix, iy);
+  const sprinting = !!input.sprint && (p.stamina || 0) > 0 && inputMag > 0 && (p.dodgeMs || 0) <= 0;
+  const speed = (p.moveSpeed || 230) * (sprinting ? 1.45 : 1);
+  if ((p.dodgeMs || 0) > 0) {
+    p.vx *= 0.9; p.vy *= 0.9;
+    p.dodgeMs = Math.max(0, p.dodgeMs - dt);
+  } else {
+    const tvx = ix * speed, tvy = iy * speed;
+    const k = 1 - Math.exp(-12 * dt);
+    p.vx = p.vx + (tvx - p.vx) * k;
+    p.vy = p.vy + (tvy - p.vy) * k;
+  }
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+  const dr = Math.hypot(p.x, p.y);
+  const limit = ARENA_R - (p.r || 15) - 10;
+  if (dr > limit) {
+    p.x *= limit / dr;
+    p.y *= limit / dr;
+    p.vx *= 0.5; p.vy *= 0.5;
+  }
+  if (typeof input.ang === 'number') p.angle = input.ang;
+}
+
 const rand = (a, b) => a + Math.random() * (b - a);
 const randi = (a, b) => Math.floor(rand(a, b));
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
@@ -329,24 +364,7 @@ export class World {
       const sprinting = !!input.sprint && p.stamina > 0 && inputMag > 0 && p.dodgeMs <= 0;
       if (sprinting) p.stamina = Math.max(0, p.stamina - dt);
       else p.stamina = Math.min(p.maxStamina, p.stamina + dt * 0.5);
-      const speed = p.moveSpeed * (sprinting ? 1.45 : 1);
-      if (p.dodgeMs > 0) {
-        p.dodgeMs -= dt;
-        p.vx *= 0.9; p.vy *= 0.9;
-      } else {
-        const tvx = ix * speed, tvy = iy * speed;
-        p.vx = lerp(p.vx, tvx, 1 - Math.exp(-12 * dt));
-        p.vy = lerp(p.vy, tvy, 1 - Math.exp(-12 * dt));
-      }
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      const dr = Math.hypot(p.x, p.y);
-      if (dr > ARENA_R - p.r - 10) {
-        p.x *= (ARENA_R - p.r - 10) / dr;
-        p.y *= (ARENA_R - p.r - 10) / dr;
-        p.vx *= 0.5; p.vy *= 0.5;
-      }
-      p.angle = (typeof input.ang === 'number') ? input.ang : p.angle;
+      applyPlayerMovement(p, input, dt);
 
       if (input.dodge && p.dodgeCd <= 0) {
         let dx = ix, dy = iy;
@@ -384,7 +402,7 @@ export class World {
       }
       p.mag[w.key] -= 1;
     }
-    p.fireCdMs = w.fireRate;
+    p.fireCdMs = w.auto ? w.fireRate : w.fireRate * 0.5;
     const muzzleX = p.x + Math.cos(p.angle) * 22;
     const muzzleY = p.y + Math.sin(p.angle) * 22;
     for (let i = 0; i < w.shots; i++) {
