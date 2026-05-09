@@ -66,9 +66,16 @@ export class Renderer {
     return v;
   }
   resize() {
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.viewW = window.innerWidth;
     this.viewH = window.innerHeight;
+    // Cap DPR aggressively on small/touch viewports — phones report DPR=2..3,
+    // which quadruples canvas fill cost for no perceptible visual gain at this
+    // art style. This is the single biggest mobile-perf win during movement.
+    const isSmall = this.viewW <= 900 || this.viewH <= 900;
+    const isCoarse = typeof window !== 'undefined'
+      && window.matchMedia?.('(any-pointer: coarse)').matches;
+    const dprCap = (isSmall || isCoarse) ? 1 : 2;
+    this.dpr = Math.min(window.devicePixelRatio || 1, dprCap);
     this.canvas.width = Math.floor(this.viewW * this.dpr);
     this.canvas.height = Math.floor(this.viewH * this.dpr);
     this.canvas.style.width = this.viewW + 'px';
@@ -385,7 +392,9 @@ export class Renderer {
     // wider than the screen, so widen the spawn area to match.
     const worldW = this.viewW / this.baseZoom;
     const worldH = this.viewH / this.baseZoom;
-    const target = 28;
+    // Halve fog density on small/touch viewports — each wisp is a full sprite
+    // blit with 'screen' compositing, which dominates mobile fill cost.
+    const target = (this.dpr < 2 && this.viewW <= 900) ? 14 : 28;
     while (this.fog.length < target) {
       const ox = (Math.random() - 0.5) * (worldW + 600);
       const oy = (Math.random() - 0.5) * (worldH + 400);
