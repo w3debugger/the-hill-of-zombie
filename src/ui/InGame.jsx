@@ -19,6 +19,7 @@ export function HUD({ gameRef }) {
   };
   const [tabHeld, setTabHeld] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
 
   useEffect(() => {
     const onKey = (e) => { if (e.code === 'Tab') setTabHeld(true); };
@@ -86,6 +87,12 @@ export function HUD({ gameRef }) {
     setMuted(next);
     gameRef.current?.audio.setMuted(next);
   };
+  const toggleZoom = () => {
+    const r = gameRef.current?.renderer;
+    if (!r) return;
+    const z = r.toggleUserZoom();
+    setZoomed(z > 1.01);
+  };
 
   return (
     <div class="hud">
@@ -106,9 +113,19 @@ export function HUD({ gameRef }) {
             </div>
           </div>
         </div>
-        <button class="icon-btn mute-btn" ref={refs.muteBtn} onClick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
-          {muted ? '🔇' : '🔊'}
-        </button>
+        <div class="hud-top-right">
+          <button
+            class={`icon-btn zoom-btn ${zoomed ? 'active' : ''}`}
+            onClick={toggleZoom}
+            aria-label={zoomed ? 'Exit zoom' : 'Enter zoom mode'}
+            title={zoomed ? 'Exit zoom' : 'Zoom in'}
+          >
+            {zoomed ? '🔎−' : '🔍+'}
+          </button>
+          <button class="icon-btn mute-btn" ref={refs.muteBtn} onClick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
+            {muted ? '🔇' : '🔊'}
+          </button>
+        </div>
       </div>
 
       <div class={`players-overlay ${tabHeld ? 'visible' : ''}`}>
