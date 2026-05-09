@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks';
 import { GameClient } from '../game/client.js';
-import { NetClient } from '../net/client.js';
+import { RTCHost, RTCJoiner } from '../net/rtc.js';
 import { C2S, S2C } from '../net/protocol.js';
 import { Intro, MainMenu, Lobby, GameOver, ConnectingOverlay } from './Screens.jsx';
 import { HUD, Shop, Pause, RadioStack, WaveBanner, HitVignette, TouchControls } from './InGame.jsx';
@@ -39,7 +39,7 @@ export function App() {
   const [screen, setScreen] = useState('intro');
   const [profile, setProfileState] = useState(loadProfile);
   const setProfile = (p) => { saveProfile(p); setProfileState(p); };
-  const [mode, setMode] = useState(null);            // 'solo' | 'mp'
+  const [mode, setMode] = useState(null);            // 'solo' | 'mp_host' | 'mp_join'
   const [lobby, setLobby] = useState(null);          // { code, players, hostId, yourId }
   const [error, setError] = useState(null);
   const [connecting, setConnecting] = useState(null); // string label or null
@@ -89,23 +89,24 @@ export function App() {
   const hostMP = async () => {
     setError(null);
     setConnecting('Connecting…');
-    const net = new NetClient(WS_URL);
+    const net = new RTCHost(WS_URL);
     try { await net.connect(); }
-    catch (e) { setConnecting(null); setError(`Could not reach ${WS_URL}. Is the multiplayer server running on port 3001?`); return; }
+    catch (e) { setConnecting(null); setError(`Could not reach ${WS_URL}. Is the signaling server running on port 3001?`); return; }
     netRef.current = net;
-    let myId = null;
-    net.on(S2C.WELCOME, (m) => { myId = m.id; });
     net.on(S2C.LOBBY, (m) => {
-      setLobby({ code: m.code, players: m.players, hostId: m.host, yourId: myId });
+      setLobby({ code: m.code, players: m.players, hostId: m.host, yourId: net.localId });
       setConnecting(null);
       setScreen('lobby');
     });
-    net.on(S2C.GAME_START, (m) => {
-      setMode('mp');
+    net.on(S2C.GAME_START, async () => {
+      setConnecting(net.peerInfo.length ? 'Connecting peers…' : null);
+      try { await net.waitForPeers(); }
+      catch (e) {}
+      setConnecting(null);
+      setMode('mp_host');
       setScreen('game');
       setGameState('playing');
       setEndStats(null);
-      // GameClient will be initialized in effect below using the existing net
     });
     net.on(S2C.ERROR, (m) => { setError(m.msg); setConnecting(null); });
     net.on(S2C.KICKED, (m) => { setError(m.reason); leaveRoom(); });
@@ -117,19 +118,23 @@ export function App() {
   const joinMP = async (code) => {
     setError(null);
     setConnecting('Connecting…');
-    const net = new NetClient(WS_URL);
+    const net = new RTCJoiner(WS_URL);
     try { await net.connect(); }
     catch (e) { setConnecting(null); setError(`Could not reach ${WS_URL}.`); return; }
     netRef.current = net;
-    let myId = null;
-    net.on(S2C.WELCOME, (m) => { myId = m.id; });
     net.on(S2C.LOBBY, (m) => {
-      setLobby({ code: m.code, players: m.players, hostId: m.host, yourId: myId });
+      setLobby({ code: m.code, players: m.players, hostId: m.host, yourId: net.localId });
       setConnecting(null);
       setScreen('lobby');
     });
-    net.on(S2C.GAME_START, (m) => {
-      setMode('mp');
+    net.on(S2C.GAME_START, async () => {
+      setConnecting('Connecting to host…');
+      // Wait for the host's DataChannel to open.
+      await new Promise((res) => {
+        const off = net.on('_rtc_ready', () => { off(); res(); });
+      });
+      setConnecting(null);
+      setMode('mp_join');
       setScreen('game');
       setGameState('playing');
       setEndStats(null);
@@ -195,7 +200,9 @@ export function App() {
         client.startPreview();
       } else if (mode === 'solo') {
         client.startSolo({ name: profile.name, color: profile.color });
-      } else if (mode === 'mp' && netRef.current && lobby) {
+      } else if (mode === 'mp_host' && netRef.current) {
+        client.startHost(netRef.current, profile);
+      } else if (mode === 'mp_join' && netRef.current && lobby) {
         client.startMultiplayer(netRef.current, lobby.yourId);
       }
     };

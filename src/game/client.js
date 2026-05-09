@@ -1,15 +1,23 @@
 // GameClient: glues world + renderer + audio + input together.
-// Supports solo (runs World locally) or multiplayer (renders snapshots from server).
+// Supports three modes:
+//   - solo:  runs World locally, no networking.
+//   - host:  runs World locally AND broadcasts snapshots/events to joiners
+//            via WebRTC DataChannels (see RTCHost).
+//   - join:  no World; renders snapshots received from the host over the
+//            DataChannel.
 //
-// Multiplayer notes (LAN-tuned — no interp delay, no client prediction):
-//  - We render the latest server snapshot directly. On WiFi/LAN the round trip
-//    is low enough (1–5 ms) that input feels snappy without prediction, and
-//    skipping the interp buffer means zero added latency.
-//  - Snapshots are lean (no bullets, no immutable fields). The client pieces
-//    together a "live"-shaped world from the latest snap + cached static info
-//    received earlier in 'player_joined' / 'zombie_spawned' / 'pickup_spawned'.
-//  - Bullets are cosmetic on the wire — clients spawn them from 'fire' events
-//    and simulate ballistics locally. Server stays authoritative for hits.
+// Multiplayer notes (WebRTC P2P — no interp delay, no client prediction):
+//  - Same-WiFi peers negotiate a direct LAN route via STUN, so latency is
+//    LAN-equivalent (~1–5 ms). Across the internet, peers connect over their
+//    public addresses; latency is whatever the direct route between them is.
+//  - We render the latest snapshot directly — no interp buffer, zero added
+//    latency. Snapshots are lean (no bullets, no immutable fields). The
+//    client assembles a "live"-shaped world from the latest snap + cached
+//    static info from 'player_joined' / 'zombie_spawned' / 'pickup_spawned'
+//    events.
+//  - Bullets are cosmetic on the wire — joiners spawn them from 'fire'
+//    events and simulate ballistics locally. The host stays authoritative
+//    for hits.
 
 import { World } from './world.js';
 import { Renderer } from './render.js';
@@ -79,13 +87,33 @@ export class GameClient {
     this._begin();
   }
 
-  // Multiplayer (called after lobby Start)
+  // Multiplayer joiner — render snapshots received from the host.
   startMultiplayer(net, yourId) {
     this.net = net;
     this.localPlayerId = yourId;
     this.renderer.setLocalPlayer(yourId);
     net.on('snapshot', (msg) => this._onSnapshot(msg));
     net.on('events', (msg) => this._handleEvents(msg.events));
+    this._begin();
+  }
+
+  // Multiplayer host — runs World locally with the host as one player and
+  // each joiner as another. The loop pulls peer inputs from rtcHost each
+  // tick, steps World, and broadcasts the resulting snapshot + events.
+  startHost(rtcHost, { name = 'Sgt. Vance', color = '#5cc8ff' } = {}) {
+    this.rtcHost = rtcHost;
+    this.localWorld = new World();
+    this.localPlayerId = rtcHost.localId;
+    this.localWorld.addPlayer(rtcHost.localId, name, color);
+    for (const info of rtcHost.peerList()) {
+      this.localWorld.addPlayer(info.id, info.name, info.color);
+    }
+    rtcHost.on('peer_left', ({ id }) => {
+      this.localWorld?.removePlayer(id);
+    });
+    this.renderer.setLocalPlayer(this.localPlayerId);
+    this.localWorld.startGame();
+    this.world = this.localWorld.live();
     this._begin();
   }
 
@@ -136,12 +164,21 @@ export class GameClient {
     inputState.ready = !!this.input.readyHeld;
 
     if (this.localWorld) {
-      // ----- Solo: authoritative simulation runs locally -----
-      // Freeze the world while the kill-cam plays so zombies aren't chewing the
-      // tower while the camera is busy admiring a headshot.
-      if (!this.renderer.isCinematicActive()) {
-        const events = this.localWorld.step(dt, { [this.localPlayerId]: inputState });
+      // ----- Solo or host: authoritative simulation runs locally -----
+      // In solo, kill-cam pauses the world so zombies aren't chewing the tower
+      // while the camera admires a headshot. As host, we keep stepping so
+      // joiners don't freeze — their cinematics fire independently in their
+      // own clients.
+      const skipStep = !this.rtcHost && this.renderer.isCinematicActive();
+      if (!skipStep) {
+        const inputs = this.rtcHost ? this.rtcHost.getPeerInputs() : {};
+        inputs[this.localPlayerId] = inputState;
+        const events = this.localWorld.step(dt, inputs);
         this._handleEvents(events);
+        if (this.rtcHost) {
+          this.rtcHost.broadcastEvents(events);
+          this.rtcHost.broadcastSnapshot(this.localWorld.snapshot());
+        }
       }
       this.world = this.localWorld.live();
       this._processStateTransitions();
