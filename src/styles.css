@@ -994,42 +994,6 @@ button { font-family: inherit; }
 }
 
 /* =========================================
-   ORIENTATION LOCK (mobile portrait → rotate prompt)
-   ========================================= */
-.orientation-lock {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: #0a0d10;
-  color: var(--ink-dim);
-  place-items: center;
-  align-content: center;
-  justify-items: center;
-  gap: 20px;
-  font-family: var(--font-ui);
-}
-.orientation-lock-icon {
-  width: 64px;
-  height: 40px;
-  border: 2px solid currentColor;
-  border-radius: 6px;
-  animation: rotate-hint 1.8s ease-in-out infinite;
-}
-@keyframes rotate-hint {
-  0%, 40% { transform: rotate(0deg); }
-  60%, 100% { transform: rotate(-90deg); }
-}
-.orientation-lock-text {
-  font-size: 12px;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
-}
-@media (orientation: portrait) and (any-pointer: coarse) and (max-device-width: 1180px) {
-  .orientation-lock { display: grid; }
-}
-
-/* =========================================
    RESPONSIVE
    ========================================= */
 @media (max-width: 820px) {
@@ -1116,8 +1080,8 @@ button { font-family: inherit; }
   }
 }
 
-/* Landscape phones: keep HUD compact on tiny heights */
-@media (max-height: 500px) and (orientation: landscape) {
+/* Short-height screens: keep HUD compact on tiny heights */
+@media (max-height: 500px) {
   .hud-row.top { padding: 6px 12px; }
   .hud-row.bottom { padding-bottom: 8px; flex-direction: row; }
   .badge { padding: 2px 6px; min-width: 0; }

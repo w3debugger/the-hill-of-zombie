@@ -223,28 +223,8 @@ export function App() {
     }
   };
 
-  useEffect(() => {
-    if (!IS_TOUCH) return;
-    const tryLock = () => {
-      const o = window.screen?.orientation;
-      if (o && typeof o.lock === 'function') {
-        o.lock('landscape').catch(() => {});
-      }
-    };
-    tryLock();
-    const onFs = () => tryLock();
-    document.addEventListener('fullscreenchange', onFs);
-    return () => document.removeEventListener('fullscreenchange', onFs);
-  }, []);
-
   return (
     <>
-      {IS_TOUCH && (
-        <div class="orientation-lock" role="alertdialog" aria-label="Rotate your device">
-          <div class="orientation-lock-icon" aria-hidden="true" />
-          <div class="orientation-lock-text">Rotate to landscape</div>
-        </div>
-      )}
       {screen === 'intro' && <Intro onDone={finishIntro} />}
       {screen === 'menu' && (
         <MainMenu
