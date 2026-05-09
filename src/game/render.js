@@ -19,6 +19,10 @@ export class Renderer {
     this.particles = [];
     this.decals = [];
     this.cam = { x: 0, y: 0, sx: 0, sy: 0, shake: 0, zoom: 1, targetX: null, targetY: null, focusBlend: 0 };
+    // Base zoom scales the world view per-device. Phones get zoomed-out so
+    // they see roughly the same chunk of arena as desktops. cam.zoom (kill-cam)
+    // multiplies on top of this.
+    this.baseZoom = 1;
     this.timeMs = 0;
     this.localPlayerId = null;
     this.localMuzzleFlash = 0;
@@ -69,6 +73,12 @@ export class Renderer {
     this.canvas.height = Math.floor(this.viewH * this.dpr);
     this.canvas.style.width = this.viewW + 'px';
     this.canvas.style.height = this.viewH + 'px';
+    // Hold ~1400 world units of visible width when possible. On smaller
+    // viewports, zoom out so phones see comparable territory to desktops —
+    // otherwise zombies (which spawn at world-unit 940) appear right on top
+    // of the player. Floor at 0.5 so objects never get unreadably tiny.
+    const target = 1400;
+    this.baseZoom = Math.max(0.5, Math.min(1, this.viewW / target));
     this._buildLightingSprite();
   }
 
@@ -159,9 +169,10 @@ export class Renderer {
   worldToScreen(wx, wy) {
     return { x: (wx - this.cam.x) + this.viewW / 2 + this.cam.sx, y: (wy - this.cam.y) + this.viewH / 2 + this.cam.sy };
   }
-  // screenToWorld inverts the ctx.scale so mouse aim stays correct during a zoomed cinematic.
+  // screenToWorld inverts the ctx.scale so mouse aim stays correct under both
+  // baseZoom (per-device) and cinematic zoom.
   screenToWorld(sx, sy) {
-    const z = this.cam.zoom || 1;
+    const z = (this.cam.zoom || 1) * this.baseZoom;
     const cx = this.viewW / 2 + this.cam.sx;
     const cy = this.viewH / 2 + this.cam.sy;
     return { x: (sx - cx) / z + this.cam.x, y: (sy - cy) / z + this.cam.y };
@@ -355,12 +366,14 @@ export class Renderer {
   }
 
   _tickFog(dt) {
-    // Keep ~26 wisps in the camera's vicinity. Spawn new ones on the upwind
-    // edge so they drift across view.
+    // Spawn area is in world units. With baseZoom<1 the visible region is
+    // wider than the screen, so widen the spawn area to match.
+    const worldW = this.viewW / this.baseZoom;
+    const worldH = this.viewH / this.baseZoom;
     const target = 28;
     while (this.fog.length < target) {
-      const ox = (Math.random() - 0.5) * (this.viewW + 600);
-      const oy = (Math.random() - 0.5) * (this.viewH + 400);
+      const ox = (Math.random() - 0.5) * (worldW + 600);
+      const oy = (Math.random() - 0.5) * (worldH + 400);
       this.fog.push({
         x: this.cam.x + ox,
         y: this.cam.y + oy,
@@ -380,7 +393,7 @@ export class Renderer {
       f.life -= dt;
       // Drop wisps that wandered far off-camera or expired.
       const dx = f.x - this.cam.x, dy = f.y - this.cam.y;
-      if (f.life <= 0 || Math.abs(dx) > this.viewW * 0.9 || Math.abs(dy) > this.viewH * 0.9) {
+      if (f.life <= 0 || Math.abs(dx) > worldW * 0.9 || Math.abs(dy) > worldH * 0.9) {
         this.fog.splice(i, 1);
       }
     }
@@ -410,7 +423,7 @@ export class Renderer {
     ctx.clearRect(0, 0, this.viewW, this.viewH);
     if (!world) return;
 
-    const zoom = this.cam.zoom || 1;
+    const zoom = (this.cam.zoom || 1) * this.baseZoom;
     const zoomed = Math.abs(zoom - 1) > 0.001;
 
     if (zoomed) {
@@ -523,7 +536,7 @@ export class Renderer {
   drawArenaEdge() {
     // Cull: if the camera is far from the arena ring, the stroke arcs aren't visible.
     const camDist = Math.hypot(this.cam.x, this.cam.y);
-    const viewReach = Math.max(this.viewW, this.viewH) * 0.6;
+    const viewReach = Math.max(this.viewW, this.viewH) * 0.6 / this.baseZoom;
     if (camDist + viewReach < ARENA_R - 100) return;
     const ctx = this.ctx;
     const c = this.worldToScreen(0, 0);
